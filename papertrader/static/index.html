@@ -26,6 +26,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0; color: var(--text); min-height: 100vh;
@@ -170,6 +171,49 @@
               background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: 8px; }
   @keyframes shimmer { to { background-position: -200% 0; } }
 
+  /* Profile menu */
+  .profile-wrap { position: relative; }
+  .profile-btn { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); background: var(--card);
+                 border-radius: 12px; padding: 5px 12px 5px 5px; font-weight: 650; max-width: 240px; }
+  .profile-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .profile-btn .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .profile-btn svg { color: var(--muted); flex: none; }
+  .pav { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff; font-weight: 800;
+         font-size: 13px; flex: none; }
+  .menu { position: absolute; right: 0; top: calc(100% + 8px); width: 300px; max-width: calc(100vw - 32px); z-index: 20;
+          background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 18px 50px rgba(0,0,0,.22);
+          padding: 8px; display: none; }
+  .menu.open { display: block; }
+  .menu-label { font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 8px 10px 4px; }
+  .menu-list { max-height: 280px; overflow-y: auto; }
+  .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; text-align: left;
+               padding: 8px 10px; border-radius: 10px; }
+  .menu-item:hover:not(:disabled) { background: var(--card-2); }
+  .menu-item .grow { flex: 1; min-width: 0; }
+  .menu-item .t { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-item .s { font-size: 12.5px; color: var(--muted); }
+  .menu-item .check { color: var(--accent); font-weight: 800; }
+  .menu-item.danger { color: var(--down); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
+  .menu-item .ico { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--card-2); flex: none; }
+
+  /* Dialog */
+  dialog { border: 1px solid var(--line); border-radius: 20px; padding: 0; width: 420px; max-width: calc(100vw - 32px);
+           background: var(--card); color: var(--text); box-shadow: 0 30px 80px rgba(0,0,0,.35); }
+  dialog::backdrop { background: rgba(8, 10, 18, .55); backdrop-filter: blur(3px); }
+  .dlg { padding: 24px; display: grid; gap: 16px; }
+  .dlg h3 { margin: 0; font-size: 19px; font-weight: 750; letter-spacing: -.01em; }
+  .dlg p { margin: -8px 0 0; color: var(--muted); font-size: 14px; }
+  .dlg label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .dlg input { color: var(--text); border: 1px solid var(--line); background: var(--card-2); border-radius: 12px; padding: 11px 13px; font-size: 16px;
+               font-weight: 600; outline: 0; }
+  .dlg input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .dlg-actions button { padding: 10px 16px; }
+  .primary.danger { background: #e11d48; }
+  .dlg-error { color: var(--down); font-size: 13.5px; font-weight: 600; margin-top: -6px; }
+
   @media (max-width: 900px) {
     .overview, .grid { grid-template-columns: 1fr; }
     .overview-side { border-left: 0; border-top: 1px solid var(--line); }
@@ -180,6 +224,8 @@
     .mini-stats { grid-template-columns: 1fr 1fr; }
     .mini:last-child { grid-column: 1 / -1; }
     .brand p { display: none; }
+    .brand h1 { font-size: 16px; }
+    .profile-btn { max-width: 150px; }
     .alloc { gap: 16px; } .donut { width: 108px; height: 108px; }
     .price { font-size: 28px; }
   }
@@ -197,7 +243,21 @@
         <p>Pretend money, real prices</p>
       </div>
     </div>
-    <button class="ghost" id="reset">Reset portfolio</button>
+    <div class="profile-wrap">
+      <button class="profile-btn" id="profile-btn" aria-haspopup="true" aria-expanded="false">
+        <span class="pav" id="profile-av">·</span>
+        <span class="pname" id="profile-name">Loading…</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="menu" id="menu" role="menu">
+        <div class="menu-label">Profiles</div>
+        <div class="menu-list" id="menu-list"></div>
+        <hr>
+        <button class="menu-item" data-action="new"><span class="ico">＋</span><span class="grow t">New profile</span></button>
+        <button class="menu-item" data-action="reset"><span class="ico">↺</span><span class="grow t">Reset this profile</span></button>
+        <button class="menu-item danger" data-action="delete"><span class="ico">✕</span><span class="grow t">Delete this profile</span></button>
+      </div>
+    </div>
   </header>
 
   <section class="card overview">
@@ -249,6 +309,24 @@
   </section>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="dialog">
+  <form class="dlg" id="dlg-form" method="dialog" autocomplete="off">
+    <h3 id="dlg-title"></h3>
+    <p id="dlg-text"></p>
+    <label id="dlg-name-row">Profile name
+      <input id="dlg-name" maxlength="30" placeholder="e.g. Alex, Retirement, YOLO">
+    </label>
+    <label id="dlg-cash-row">Starting cash
+      <input id="dlg-cash" inputmode="decimal" placeholder="$100,000">
+      <div class="presets" id="presets"></div>
+    </label>
+    <div class="dlg-error" id="dlg-error" hidden></div>
+    <div class="dlg-actions">
+      <button type="button" class="ghost" id="dlg-cancel">Cancel</button>
+      <button type="submit" class="primary" id="dlg-ok"></button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -262,7 +340,12 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const PALETTE = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#ef4444", "#84cc16"];
 const PICKS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "SPY"];
 
-const state = { portfolio: null, symbol: null, price: null, side: "buy", period: "1mo", colors: {} };
+const state = { portfolio: null, symbol: null, price: null, side: "buy", period: "1mo", colors: {}, profile: null, profiles: [] };
+const PRESETS = [["$10K", 10000], ["$50K", 50000], ["$100K", 100000], ["$1M", 1000000]];
+const store = {
+  get() { try { return localStorage.getItem("papertrader.profile"); } catch { return null; } },
+  set(v) { try { localStorage.setItem("papertrader.profile", v); } catch {} },
+};
 
 async function api(path, body) {
   const res = await fetch(path, body === undefined ? {} : {
@@ -290,7 +373,7 @@ function colorFor(symbol) {
 /* ---------- Portfolio ---------- */
 
 async function refresh() {
-  const p = await api("/api/portfolio");
+  const p = await api("/api/portfolio?profile=" + encodeURIComponent(state.profile));
   state.portfolio = p;
   p.holdings.sort((a, b) => b.value - a.value).forEach((h) => colorFor(h.symbol));
   const change = p.total - p.starting_cash;
@@ -548,7 +631,7 @@ $("quote").addEventListener("submit", (e) => {
   const shares = $("shares").value;
   if (!(parseFloat(shares) > 0)) return toast("Enter how many shares.", false);
   busy(async () => {
-    const t = await api("/api/" + state.side, { symbol: state.symbol, shares });
+    const t = await api("/api/" + state.side, { profile: state.profile, symbol: state.symbol, shares });
     state.price = t.price;
     toast(`${t.side === "BUY" ? "Bought" : "Sold"} ${qty(t.shares)} ${t.symbol} for ${money(t.total)}`);
     $("shares").value = "";
@@ -557,18 +640,147 @@ $("quote").addEventListener("submit", (e) => {
   });
 });
 
-$("reset").addEventListener("click", () => {
-  const input = prompt("Start over with how much cash?", "100000");
-  if (input === null) return;
-  busy(async () => {
-    await api("/api/reset", { cash: input.replace(/[$,\s]/g, "") });
-    state.colors = {};
-    toast("Portfolio reset. Fresh start!");
-    await refresh();
-  });
+/* ---------- Profiles ---------- */
+
+function initial(name) { return (name.trim()[0] || "?").toUpperCase(); }
+function profileColor(name) {
+  let h = 0;
+  for (const c of name.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+async function loadProfiles() {
+  const data = await api("/api/profiles");
+  state.profiles = data.profiles;
+  const names = data.profiles.map((p) => p.name);
+  if (!names.includes(state.profile)) {
+    const saved = store.get();
+    state.profile = names.includes(saved) ? saved : data.start;
+  }
+  renderProfiles();
+}
+
+function renderProfiles() {
+  $("profile-name").textContent = state.profile;
+  $("profile-av").textContent = initial(state.profile);
+  $("profile-av").style.background = profileColor(state.profile);
+  $("menu-list").innerHTML = state.profiles.map((p) => `
+    <button class="menu-item" data-profile="${esc(p.name)}">
+      <span class="pav" style="background:${profileColor(p.name)}">${esc(initial(p.name))}</span>
+      <span class="grow"><div class="t">${esc(p.name)}</div>
+        <div class="s">${compact(p.cash)} cash · ${p.holdings} stock${p.holdings === 1 ? "" : "s"}</div></span>
+      ${p.name === state.profile ? '<span class="check">✓</span>' : ""}
+    </button>`).join("");
+  document.querySelector('[data-action="delete"]').hidden = state.profiles.length <= 1;
+}
+
+async function switchProfile(name) {
+  state.profile = name;
+  store.set(name);
+  state.colors = {};
+  renderProfiles();
+  await refresh();
+  if (state.symbol) renderQuote(), loadChart();
+}
+
+function toggleMenu(open) {
+  const menu = $("menu");
+  open = open ?? !menu.classList.contains("open");
+  menu.classList.toggle("open", open);
+  $("profile-btn").setAttribute("aria-expanded", open);
+  if (open) loadProfiles().catch(() => {});
+}
+
+$("profile-btn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(); });
+document.addEventListener("click", (e) => { if (!e.target.closest(".profile-wrap")) toggleMenu(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggleMenu(false); });
+
+$("menu").addEventListener("click", (e) => {
+  const item = e.target.closest(".menu-item");
+  if (!item) return;
+  toggleMenu(false);
+  if (item.dataset.profile) {
+    if (item.dataset.profile !== state.profile) busy(() => switchProfile(item.dataset.profile).then(() => toast(`Switched to ${item.dataset.profile}`)));
+  } else {
+    openDialog(item.dataset.action);
+  }
 });
 
-refresh().catch((e) => toast(e.message, false));
+/* ---------- Dialog: new / reset / delete ---------- */
+
+let dialogMode = null;
+$("presets").innerHTML = PRESETS.map(([l, v]) => `<button type="button" class="pick" data-cash="${v}">${l}</button>`).join("");
+$("presets").addEventListener("click", (e) => {
+  if (!e.target.dataset.cash) return;
+  $("dlg-cash").value = Number(e.target.dataset.cash).toLocaleString("en-US");
+  markPreset();
+});
+$("dlg-cash").addEventListener("input", markPreset);
+function markPreset() {
+  const v = parseFloat($("dlg-cash").value.replace(/[$,\s]/g, ""));
+  document.querySelectorAll("#presets .pick").forEach((b) => b.classList.toggle("active", Number(b.dataset.cash) === v));
+}
+
+function openDialog(mode) {
+  dialogMode = mode;
+  const cfg = {
+    new: { title: "New profile", text: "Each profile is its own portfolio with its own starting cash.", ok: "Create profile", name: true, cash: true },
+    reset: { title: `Reset ${state.profile}?`, text: "This clears all holdings and trade history. Choose how much cash to start over with.", ok: "Reset profile", cash: true, danger: true },
+    delete: { title: `Delete ${state.profile}?`, text: "This permanently removes the profile, its holdings and its trade history.", ok: "Delete profile", danger: true },
+  }[mode];
+  $("dlg-title").textContent = cfg.title;
+  $("dlg-text").textContent = cfg.text;
+  $("dlg-ok").textContent = cfg.ok;
+  $("dlg-ok").className = "primary" + (cfg.danger ? " danger" : "");
+  $("dlg-name-row").hidden = !cfg.name;
+  $("dlg-cash-row").hidden = !cfg.cash;
+  $("dlg-name").value = "";
+  const start = mode === "reset" ? state.portfolio?.starting_cash ?? 100000 : 100000;
+  $("dlg-cash").value = start.toLocaleString("en-US");
+  markPreset();
+  $("dlg-error").hidden = true;
+  $("dialog").showModal();
+  (cfg.name ? $("dlg-name") : cfg.cash ? $("dlg-cash") : $("dlg-cancel")).focus();
+}
+
+$("dlg-cancel").addEventListener("click", () => $("dialog").close());
+$("dlg-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const cash = $("dlg-cash").value;
+  $("dlg-ok").disabled = true;
+  try {
+    if (dialogMode === "new") {
+      const { name } = await api("/api/profiles", { name: $("dlg-name").value, cash });
+      $("dialog").close();
+      await loadProfiles();
+      await switchProfile(name);
+      toast(`Created ${name} with ${money(state.portfolio.cash)}`);
+    } else if (dialogMode === "reset") {
+      await api("/api/reset", { profile: state.profile, cash });
+      $("dialog").close();
+      state.colors = {};
+      await refresh();
+      if (state.symbol) renderTicket();
+      toast(`${state.profile} reset with ${money(state.portfolio.cash)}`);
+    } else if (dialogMode === "delete") {
+      const gone = state.profile;
+      await api("/api/profiles/delete", { name: gone });
+      $("dialog").close();
+      state.profile = null;
+      await loadProfiles();
+      await switchProfile(state.profile);
+      toast(`Deleted ${gone}`);
+    }
+  } catch (err) {
+    $("dlg-error").textContent = err.message;
+    $("dlg-error").hidden = false;
+  } finally {
+    $("dlg-ok").disabled = false;
+  }
+});
+
+loadProfiles().then(() => { store.set(state.profile); return refresh(); }).catch((e) => toast(e.message, false));
+
 </script>
 </body>
 </html>

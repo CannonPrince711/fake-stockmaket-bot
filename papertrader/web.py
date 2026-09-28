@@ -9,26 +9,53 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .portfolio import DEFAULT_STARTING_CASH, Portfolio, TradeError
+from .portfolio import Portfolio, TradeError
 from .prices import PriceError, YahooPrices
+from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
 
 PAGE = Path(__file__).with_name("static") / "index.html"
 
 
 class Trader:
-    """The portfolio plus a price source, safe to use from several requests at once."""
+    """All profiles plus a price source, safe to use from several requests at once."""
 
-    def __init__(self, path: Path, prices=None):
-        self.path = Path(path)
+    def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE):
+        self.profiles = profiles
         self.prices = prices or YahooPrices()
         self.lock = threading.Lock()
-        self.portfolio = Portfolio.load(self.path)
+        self.start_profile = profiles.ensure(start_profile)
 
-    def summary(self) -> dict:
+    def list_profiles(self) -> dict:
         with self.lock:
-            p = self.portfolio
+            rows = []
+            for name in self.profiles.names():
+                p = self.profiles.load(name)
+                rows.append({"name": name, "cash": p.cash, "starting_cash": p.starting_cash,
+                             "holdings": len(p.positions), "trades": len(p.history)})
+        return {"profiles": rows, "start": self.start_profile}
+
+    def create_profile(self, name: str, cash) -> dict:
+        with self.lock:
+            self.profiles.create(name, cash)
+            return {"name": self.profiles.find(name)}
+
+    def delete_profile(self, name: str) -> dict:
+        with self.lock:
+            name = self.profiles.find(name)
+            if len(self.profiles.names()) <= 1:
+                raise TradeError("You need at least one profile")
+            self.profiles.delete(name)
+            if name == self.start_profile:
+                self.start_profile = self.profiles.names()[0]
+        return {"ok": True}
+
+    def summary(self, profile: str) -> dict:
+        with self.lock:
+            name = self.profiles.find(profile)
+            p = self.profiles.load(name)
             positions = {s: (pos.shares, pos.avg_cost) for s, pos in p.positions.items()}
-            data = {"cash": p.cash, "starting_cash": p.starting_cash, "history": list(reversed(p.history))}
+            data = {"profile": name, "cash": p.cash, "starting_cash": p.starting_cash,
+                    "history": list(reversed(p.history))}
         holdings, total, stale = [], data["cash"], False
         for symbol, (shares, avg_cost) in sorted(positions.items()):
             try:
@@ -50,11 +77,13 @@ class Trader:
     def history(self, symbol: str, period: str) -> dict:
         return {"symbol": symbol.strip().upper(), "period": period, "points": self.prices.get_history(symbol, period)}
 
-    def trade(self, side: str, symbol: str, shares) -> dict:
+    def trade(self, profile: str, side: str, symbol: str, shares) -> dict:
         symbol = symbol.strip().upper()
         with self.lock:
+            name = self.profiles.find(profile)
+            portfolio = self.profiles.load(name)
             if side == "sell" and str(shares).lower() == "all":
-                pos = self.portfolio.positions.get(symbol)
+                pos = portfolio.positions.get(symbol)
                 if not pos:
                     raise TradeError(f"You don't own any {symbol}")
                 shares = pos.shares
@@ -63,18 +92,17 @@ class Trader:
             except (TypeError, ValueError):
                 raise TradeError(f"'{shares}' isn't a number of shares") from None
             price = self.prices.get_price(symbol)
-            do = self.portfolio.buy if side == "buy" else self.portfolio.sell
+            do = portfolio.buy if side == "buy" else portfolio.sell
             trade = do(symbol, shares, price)
-            self.portfolio.save(self.path)
+            self.profiles.save(name, portfolio)
             return trade
 
-    def reset(self, cash) -> None:
-        cash = float(cash or DEFAULT_STARTING_CASH)
-        if cash <= 0:
-            raise TradeError("Starting cash must be greater than zero")
+    def reset(self, profile: str, cash) -> dict:
+        cash = parse_cash(cash)
         with self.lock:
-            self.portfolio = Portfolio(cash=cash, starting_cash=cash)
-            self.portfolio.save(self.path)
+            name = self.profiles.find(profile)
+            self.profiles.save(name, Portfolio(cash=cash, starting_cash=cash))
+        return {"ok": True}
 
 
 def make_handler(trader: Trader):
@@ -102,8 +130,11 @@ def make_handler(trader: Trader):
             url = urlparse(self.path)
             if url.path == "/":
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif url.path == "/api/profiles":
+                self.handle_api(trader.list_profiles)
             elif url.path == "/api/portfolio":
-                self.handle_api(trader.summary)
+                profile = parse_qs(url.query).get("profile", [trader.start_profile])[0]
+                self.handle_api(lambda: trader.summary(profile))
             elif url.path == "/api/quote":
                 symbol = parse_qs(url.query).get("symbol", [""])[0]
                 self.handle_api(lambda: trader.quote(symbol))
@@ -122,23 +153,31 @@ def make_handler(trader: Trader):
                 body = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
                 return self.send_json({"error": "Bad request"}, 400)
+            if not isinstance(body, dict):
+                return self.send_json({"error": "Bad request"}, 400)
+            profile = str(body.get("profile") or trader.start_profile)
             if url.path in ("/api/buy", "/api/sell"):
                 side = url.path.rsplit("/", 1)[1]
-                self.handle_api(lambda: trader.trade(side, body.get("symbol", ""), body.get("shares")))
+                self.handle_api(lambda: trader.trade(profile, side, str(body.get("symbol", "")), body.get("shares")))
             elif url.path == "/api/reset":
-                self.handle_api(lambda: trader.reset(body.get("cash")) or {"ok": True})
+                self.handle_api(lambda: trader.reset(profile, body.get("cash")))
+            elif url.path == "/api/profiles":
+                self.handle_api(lambda: trader.create_profile(str(body.get("name", "")), body.get("cash")))
+            elif url.path == "/api/profiles/delete":
+                self.handle_api(lambda: trader.delete_profile(str(body.get("name", ""))))
             else:
                 self.send_json({"error": "Not found"}, 404)
 
     return Handler
 
 
-def make_server(path: Path, host: str = "127.0.0.1", port: int = 8000, prices=None) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), make_handler(Trader(path, prices)))
+def make_server(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, prices=None,
+                start_profile: str = DEFAULT_PROFILE) -> ThreadingHTTPServer:
+    return ThreadingHTTPServer((host, port), make_handler(Trader(profiles, prices, start_profile)))
 
 
-def serve(path: Path, port: int = 8000, open_browser: bool = True) -> None:
-    server = make_server(path, port=port)
+def serve(profiles: Profiles, port: int = 8000, open_browser: bool = True, start_profile: str = DEFAULT_PROFILE) -> None:
+    server = make_server(profiles, port=port, start_profile=start_profile)
     url = f"http://127.0.0.1:{server.server_address[1]}"
     print(f"Fake Stock Market running at {url}  (Ctrl+C to stop)")
     if open_browser:

@@ -5,6 +5,7 @@ import urllib.request
 
 import pytest
 
+from papertrader.profiles import Profiles
 from papertrader.web import make_server
 from tests.test_trading import FakePrices
 
@@ -12,7 +13,7 @@ from tests.test_trading import FakePrices
 @pytest.fixture
 def server(tmp_path):
     prices = FakePrices({"AAPL": 200.0, "MSFT": 400.0})
-    srv = make_server(tmp_path / "p.json", port=0, prices=prices)
+    srv = make_server(Profiles(tmp_path / "profiles"), port=0, prices=prices)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     srv.base = f"http://127.0.0.1:{srv.server_address[1]}"
     srv.prices = prices
@@ -68,3 +69,23 @@ def test_history(server):
     status, data = call(server, "/api/history?symbol=aapl&period=1mo")
     assert status == 200 and data["symbol"] == "AAPL" and len(data["points"]) == 20
     assert call(server, "/api/history?symbol=NOPE")[0] == 400
+
+
+def test_profiles_api(server):
+    status, created = call(server, "/api/profiles", {"name": "Alex", "cash": "$25,000"})
+    assert status == 200 and created["name"] == "Alex"
+    assert call(server, "/api/profiles", {"name": "alex"})[0] == 400
+    call(server, "/api/buy", {"profile": "Alex", "symbol": "AAPL", "shares": 10})
+    _, alex = call(server, "/api/portfolio?profile=Alex")
+    _, default = call(server, "/api/portfolio")
+    assert alex["cash"] == 23_000 and alex["starting_cash"] == 25_000
+    assert default["cash"] == 100_000 and default["profile"] == "default"
+
+    call(server, "/api/reset", {"profile": "Alex", "cash": "5k"})
+    _, listing = call(server, "/api/profiles")
+    rows = {p["name"]: p for p in listing["profiles"]}
+    assert rows["Alex"]["cash"] == 5000 and listing["start"] == "default"
+
+    assert call(server, "/api/profiles/delete", {"name": "Alex"})[0] == 200
+    assert call(server, "/api/profiles/delete", {"name": "default"})[0] == 400  # last one stays
+    assert call(server, "/api/portfolio?profile=Alex")[0] == 400

@@ -6,6 +6,7 @@ import pytest
 from papertrader.cli import App
 from papertrader.portfolio import Portfolio, TradeError
 from papertrader.prices import PriceError
+from papertrader.profiles import Profiles, parse_cash
 
 
 class FakePrices:
@@ -31,7 +32,7 @@ class FakePrices:
 
 def make_app(tmp_path, **prices):
     out = io.StringIO()
-    app = App(tmp_path / "p.json", prices=FakePrices(prices or {"AAPL": 200.0}), out=out)
+    app = App(Profiles(tmp_path / "profiles"), prices=FakePrices(prices or {"AAPL": 200.0}), out=out)
     return app, out
 
 
@@ -83,7 +84,7 @@ def test_save_and_load_round_trip(tmp_path):
 def test_cli_buy_persists_and_portfolio_shows_profit(tmp_path):
     app, out = make_app(tmp_path, AAPL=200.0)
     app.run(["buy", "AAPL", "10"])
-    saved = json.loads((tmp_path / "p.json").read_text())
+    saved = json.loads((tmp_path / "profiles" / "default.json").read_text())
     assert saved["cash"] == 98_000
 
     app.prices.prices["AAPL"] = 210.0
@@ -112,3 +113,55 @@ def test_cli_quit_and_reset(tmp_path):
     assert app.run(["quit"]) is False
     app.run(["reset", "5000"])
     assert app.portfolio.cash == 5000
+
+
+def test_parse_cash():
+    assert parse_cash("$50,000") == 50_000
+    assert parse_cash("25k") == 25_000
+    assert parse_cash("1.5M") == 1_500_000
+    assert parse_cash(None) == 100_000
+    for bad in ("abc", "0", "-5", "2000b"):
+        with pytest.raises(TradeError):
+            parse_cash(bad)
+
+
+def test_profiles_are_separate(tmp_path):
+    profiles = Profiles(tmp_path)
+    profiles.create("Alex", "25k")
+    profiles.create("Sam")
+    alex = profiles.load("alex")  # names match without caring about case
+    alex.buy("AAPL", 10, 100)
+    profiles.save("Alex", alex)
+    assert profiles.names() == ["Alex", "Sam"]
+    assert profiles.load("Alex").cash == 24_000
+    assert profiles.load("Sam").cash == 100_000
+    with pytest.raises(TradeError):
+        profiles.create("alex")
+    with pytest.raises(TradeError):
+        profiles.create("../evil")
+    profiles.delete("Sam")
+    assert profiles.names() == ["Alex"]
+
+
+def test_old_portfolio_file_becomes_default_profile(tmp_path):
+    legacy = tmp_path / "portfolio.json"
+    Portfolio(cash=1234, starting_cash=5000).save(legacy)
+    profiles = Profiles(tmp_path / "profiles", legacy_file=legacy)
+    assert profiles.ensure() == "default"
+    assert profiles.load("default").cash == 1234
+
+
+def test_cli_profile_commands(tmp_path):
+    out = io.StringIO()
+    app = App(Profiles(tmp_path), profile="Main", cash="10k", prices=FakePrices({"AAPL": 100.0}), out=out)
+    assert app.portfolio.cash == 10_000
+    app.run(["buy", "AAPL", "5"])
+    app.run(["new", "Risky", "1m"])
+    assert app.profile == "Risky" and app.portfolio.cash == 1_000_000
+    app.run(["delete", "Risky"])
+    assert "can't delete the profile you're using" in out.getvalue()
+    app.run(["switch", "main"])
+    assert app.profile == "Main" and app.portfolio.cash == 9_500
+    app.run(["delete", "Risky"])
+    app.run(["profiles"])
+    assert "* Main" in out.getvalue() and "Risky" not in app.profiles.names()
