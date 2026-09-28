@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fake Stock Market</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --up: #15803d; --down: #b91c1c; --up-bg: #dcfce7; --down-bg: #fee2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2f38;
+      --accent: #60a5fa; --up: #4ade80; --down: #f87171; --up-bg: #14301f; --down-bg: #3a1a1a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-top: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .stat .label { color: var(--muted); font-size: 13px; }
+  .stat .value { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  form { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  input { font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+          background: var(--bg); color: var(--text); width: 140px; }
+  input#symbol { text-transform: uppercase; }
+  button { font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.buy { background: #15803d; border-color: #15803d; color: #fff; }
+  button.sell { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+  button.small { padding: 4px 10px; font-size: 13px; }
+  button.link { border: none; background: none; color: var(--muted); padding: 0; font-weight: 400; text-decoration: underline; }
+  .quote { margin-top: 12px; min-height: 22px; color: var(--muted); }
+  .quote strong { color: var(--text); }
+  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 8px; display: none; }
+  .msg.ok { display: block; background: var(--up-bg); color: var(--up); }
+  .msg.err { display: block; background: var(--down-bg); color: var(--down); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  th:first-child, td:first-child { text-align: left; }
+  td.side, th.side { text-align: center; }
+  tr:last-child td { border-bottom: none; }
+  .empty { color: var(--muted); padding: 8px 0; }
+  .tag { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .tag.BUY { background: var(--up-bg); color: var(--up); }
+  .tag.SELL { background: var(--down-bg); color: var(--down); }
+  .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  @media (max-width: 640px) {
+    .stats { grid-template-columns: 1fr; gap: 10px; }
+    .stat .value { font-size: 22px; }
+    input { width: 100%; } label { flex: 1 1 40%; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Fake Stock Market</h1>
+    <button class="link" id="reset">Reset portfolio</button>
+  </header>
+
+  <section class="card stats">
+    <div class="stat"><div class="label">Total value</div><div class="value" id="total">…</div></div>
+    <div class="stat"><div class="label">Cash</div><div class="value" id="cash">…</div></div>
+    <div class="stat"><div class="label">Gain / loss since start</div><div class="value" id="change">…</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Trade</h2>
+    <form id="trade" autocomplete="off">
+      <label>Ticker <input id="symbol" placeholder="AAPL" required></label>
+      <label>Shares <input id="shares" type="number" min="0" step="any" placeholder="10" required></label>
+      <button type="button" id="quote-btn">Get quote</button>
+      <button type="submit" class="buy" data-side="buy">Buy</button>
+      <button type="submit" class="sell" data-side="sell">Sell</button>
+    </form>
+    <div class="quote" id="quote"></div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Holdings</h2>
+    <div class="table-wrap" id="holdings"></div>
+    <div class="note" id="stale" hidden>Some live prices couldn't be loaded, so those rows show what you paid.</div>
+  </section>
+
+  <section class="card">
+    <h2>Trade history</h2>
+    <div class="table-wrap" id="history"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const money = (n) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+const signed = (n) => (n >= 0 ? "+" : "−") + money(Math.abs(n));
+const cls = (n) => (n > 0.005 ? "up" : n < -0.005 ? "down" : "");
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Something went wrong");
+  return data;
+}
+
+function flash(text, ok) {
+  const m = $("msg");
+  m.textContent = text;
+  m.className = "msg " + (ok ? "ok" : "err");
+}
+
+async function refresh() {
+  const p = await api("/api/portfolio");
+  const change = p.total - p.starting_cash;
+  const pct = p.starting_cash ? (change / p.starting_cash) * 100 : 0;
+  $("total").textContent = money(p.total);
+  $("cash").textContent = money(p.cash);
+  $("change").textContent = `${signed(change)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+  $("change").className = "value " + cls(change);
+  $("stale").hidden = !p.prices_stale;
+
+  $("holdings").innerHTML = p.holdings.length ? `
+    <table>
+      <tr><th>Ticker</th><th>Shares</th><th>Avg cost</th><th>Price</th><th>Value</th><th>Gain / loss</th><th></th></tr>
+      ${p.holdings.map((h) => `
+        <tr>
+          <td><strong>${esc(h.symbol)}</strong></td>
+          <td>${h.shares.toLocaleString("en-US", { maximumFractionDigits: 6 })}</td>
+          <td>${money(h.avg_cost)}</td>
+          <td>${money(h.price)}</td>
+          <td>${money(h.value)}</td>
+          <td class="${cls(h.pl)}">${signed(h.pl)}</td>
+          <td><button class="small" data-sell-all="${esc(h.symbol)}">Sell all</button></td>
+        </tr>`).join("")}
+    </table>` : `<div class="empty">You don't own any stocks yet. Look up a ticker above and buy some.</div>`;
+
+  $("history").innerHTML = p.history.length ? `
+    <table>
+      <tr><th>Time</th><th class="side">Side</th><th>Ticker</th><th>Shares</th><th>Price</th><th>Total</th></tr>
+      ${p.history.map((t) => `
+        <tr>
+          <td>${new Date(t.time).toLocaleString()}</td>
+          <td class="side"><span class="tag ${t.side}">${t.side}</span></td>
+          <td>${esc(t.symbol)}</td>
+          <td>${t.shares.toLocaleString("en-US", { maximumFractionDigits: 6 })}</td>
+          <td>${money(t.price)}</td>
+          <td>${money(t.total)}</td>
+        </tr>`).join("")}
+    </table>` : `<div class="empty">No trades yet.</div>`;
+}
+
+async function withBusy(fn) {
+  const buttons = document.querySelectorAll("button");
+  buttons.forEach((b) => (b.disabled = true));
+  try { await fn(); } catch (e) { flash(e.message, false); }
+  finally { buttons.forEach((b) => (b.disabled = false)); }
+}
+
+$("quote-btn").addEventListener("click", () => withBusy(async () => {
+  const symbol = $("symbol").value.trim();
+  if (!symbol) return flash("Type a ticker first, like AAPL.", false);
+  $("quote").textContent = "Looking up…";
+  try {
+    const q = await api("/api/quote?symbol=" + encodeURIComponent(symbol));
+    const shares = parseFloat($("shares").value);
+    $("quote").innerHTML = `<strong>${esc(q.symbol)}</strong> is at <strong>${money(q.price)}</strong>` +
+      (shares > 0 ? ` · ${shares} shares would cost ${money(shares * q.price)}` : "");
+  } catch (e) { $("quote").textContent = ""; throw e; }
+}));
+
+$("trade").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const side = e.submitter?.dataset.side || "buy";
+  withBusy(async () => {
+    const t = await api("/api/" + side, { symbol: $("symbol").value, shares: $("shares").value });
+    flash(`${side === "buy" ? "Bought" : "Sold"} ${t.shares} ${t.symbol} at ${money(t.price)} for ${money(t.total)}.`, true);
+    await refresh();
+  });
+});
+
+$("holdings").addEventListener("click", (e) => {
+  const symbol = e.target.dataset?.sellAll;
+  if (!symbol) return;
+  withBusy(async () => {
+    const t = await api("/api/sell", { symbol, shares: "all" });
+    flash(`Sold ${t.shares} ${t.symbol} at ${money(t.price)} for ${money(t.total)}.`, true);
+    await refresh();
+  });
+});
+
+$("reset").addEventListener("click", () => {
+  const input = prompt("Start over with how much cash?", "100000");
+  if (input === null) return;
+  withBusy(async () => {
+    await api("/api/reset", { cash: input.replace(/[$,\s]/g, "") });
+    flash("Portfolio reset.", true);
+    $("quote").textContent = "";
+    await refresh();
+  });
+});
+
+refresh().catch((e) => flash(e.message, false));
+</script>
+</body>
+</html>

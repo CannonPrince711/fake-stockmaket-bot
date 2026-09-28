@@ -141,8 +141,17 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--file", type=Path, default=DEFAULT_FILE, help="where to save your portfolio (default: portfolio.json)")
+    parser.add_argument("--web", action="store_true", help="open the browser interface instead of the terminal")
+    parser.add_argument("--port", type=int, default=8000, help="port for --web (default: 8000)")
+    parser.add_argument("--no-browser", action="store_true", help="with --web, don't open a browser tab automatically")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="a command to run once; leave empty for the interactive shell")
     opts = parser.parse_args(argv)
+
+    if opts.web:
+        from .web import serve
+
+        serve(opts.file, port=opts.port, open_browser=not opts.no_browser)
+        return 0
 
     app = App(opts.file)
     if opts.command:
