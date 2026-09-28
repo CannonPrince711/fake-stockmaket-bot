@@ -21,7 +21,7 @@ python -m papertrader --web
 ```
 
 This opens http://127.0.0.1:8000 in your browser. From there you can look up prices, buy and
-sell, see your holdings with gain/loss, and scroll back through every trade. Press Ctrl+C in the
+sell, see a price chart for any stock, track your holdings and allocation with gain/loss, and scroll back through every trade. It follows your system light/dark setting and works on a phone-sized window. Press Ctrl+C in the
 terminal to stop it. Use `--port 9000` to pick another port, or `--no-browser` to skip opening a tab.
 
 The browser and the terminal use the same `portfolio.json`, so you can switch between them.

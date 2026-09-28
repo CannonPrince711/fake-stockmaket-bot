@@ -47,6 +47,9 @@ class Trader:
     def quote(self, symbol: str) -> dict:
         return {"symbol": symbol.strip().upper(), "price": self.prices.get_price(symbol)}
 
+    def history(self, symbol: str, period: str) -> dict:
+        return {"symbol": symbol.strip().upper(), "period": period, "points": self.prices.get_history(symbol, period)}
+
     def trade(self, side: str, symbol: str, shares) -> dict:
         symbol = symbol.strip().upper()
         with self.lock:
@@ -104,6 +107,11 @@ def make_handler(trader: Trader):
             elif url.path == "/api/quote":
                 symbol = parse_qs(url.query).get("symbol", [""])[0]
                 self.handle_api(lambda: trader.quote(symbol))
+            elif url.path == "/api/history":
+                query = parse_qs(url.query)
+                symbol = query.get("symbol", [""])[0]
+                period = query.get("period", ["1mo"])[0]
+                self.handle_api(lambda: trader.history(symbol, period))
             else:
                 self.send_json({"error": "Not found"}, 404)
 

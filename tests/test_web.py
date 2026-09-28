@@ -62,3 +62,9 @@ def test_reset(server):
     assert call(server, "/api/reset", {"cash": "5000"})[0] == 200
     _, p = call(server, "/api/portfolio")
     assert p["cash"] == 5000 and p["holdings"] == []
+
+
+def test_history(server):
+    status, data = call(server, "/api/history?symbol=aapl&period=1mo")
+    assert status == 200 and data["symbol"] == "AAPL" and len(data["points"]) == 20
+    assert call(server, "/api/history?symbol=NOPE")[0] == 400

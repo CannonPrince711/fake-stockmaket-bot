@@ -18,6 +18,13 @@ class FakePrices:
             raise PriceError(f"No price found for {symbol}")
         return self.prices[symbol]
 
+    def get_history(self, symbol, period="1mo"):
+        price = self.get_price(symbol)
+        return [
+            {"time": f"2026-09-{day:02d}T00:00:00", "close": price * (0.9 + day / 200)}
+            for day in range(1, 21)
+        ]
+
     def get_prices(self, symbols):
         return {s: self.get_price(s) for s in symbols}
 
