@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -175,6 +176,14 @@ class App:
             raise TradeError(f"'{shares}' isn't a number of shares") from None
 
 
+def default_data_dir() -> Path:
+    """Where profiles live: $PAPERTRADER_DATA_DIR, else a Railway volume if one is attached, else ./profiles."""
+    for var in ("PAPERTRADER_DATA_DIR", "RAILWAY_VOLUME_MOUNT_PATH"):
+        if os.environ.get(var):
+            return Path(os.environ[var])
+    return DEFAULT_DIR
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="papertrader",
@@ -184,9 +193,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--profile", default=DEFAULT_PROFILE, help="which profile to use; it's created if it doesn't exist (default: default)")
     parser.add_argument("--cash", help="starting cash for a new profile, e.g. 50000 or 50k (default: 100k)")
-    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DIR, help="folder where profiles are saved (default: profiles)")
+    parser.add_argument("--data-dir", type=Path, default=default_data_dir(),
+                        help="folder where profiles are saved (default: profiles, or $PAPERTRADER_DATA_DIR)")
     parser.add_argument("--web", action="store_true", help="open the browser interface instead of the terminal")
-    parser.add_argument("--port", type=int, default=8000, help="port for --web (default: 8000)")
+    parser.add_argument("--host", default=os.environ.get("HOST") or ("0.0.0.0" if "PORT" in os.environ else "127.0.0.1"),
+                        help="address for --web to listen on (default: 127.0.0.1, or 0.0.0.0 when $PORT is set)")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000),
+                        help="port for --web (default: 8000, or $PORT)")
     parser.add_argument("--no-browser", action="store_true", help="with --web, don't open a browser tab automatically")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="a command to run once; leave empty for the interactive shell")
     opts = parser.parse_args(argv)
@@ -199,7 +212,9 @@ def main(argv: list[str] | None = None) -> int:
             profiles.ensure(opts.profile, opts.cash)
         except TradeError as exc:
             parser.error(str(exc))
-        serve(profiles, port=opts.port, open_browser=not opts.no_browser, start_profile=opts.profile)
+        local = opts.host in ("127.0.0.1", "localhost")
+        serve(profiles, host=opts.host, port=opts.port, open_browser=local and not opts.no_browser,
+              start_profile=opts.profile, password=os.environ.get("PAPERTRADER_PASSWORD") or None)
         return 0
 
     try:

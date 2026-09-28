@@ -89,3 +89,28 @@ def test_profiles_api(server):
     assert call(server, "/api/profiles/delete", {"name": "Alex"})[0] == 200
     assert call(server, "/api/profiles/delete", {"name": "default"})[0] == 400  # last one stays
     assert call(server, "/api/portfolio?profile=Alex")[0] == 400
+
+
+def test_password(tmp_path):
+    srv = make_server(Profiles(tmp_path), port=0, prices=FakePrices({}), password="hunter2")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(base + "/api/portfolio")
+        assert err.value.code == 401
+        with urllib.request.urlopen(base + "/healthz") as res:
+            assert res.read() == b"ok"
+        import base64
+        for pw, ok in (("wrong", False), ("hunter2", True)):
+            token = base64.b64encode(f"me:{pw}".encode()).decode()
+            req = urllib.request.Request(base + "/api/portfolio", headers={"Authorization": "Basic " + token})
+            if ok:
+                with urllib.request.urlopen(req) as res:
+                    assert json.loads(res.read())["cash"] == 100_000
+            else:
+                with pytest.raises(urllib.error.HTTPError):
+                    urllib.request.urlopen(req)
+    finally:
+        srv.shutdown()
+        srv.server_close()

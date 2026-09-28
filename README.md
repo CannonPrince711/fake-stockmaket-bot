@@ -97,6 +97,32 @@ profile called `default`, and `--cash` only matters when a profile is first crea
 
 Profile names with spaces need quotes: `new "Retirement Fund" 1m`.
 
+## Host it online (Railway)
+
+The repo is ready to deploy on [Railway](https://railway.com) as is:
+
+1. On Railway, click **New Project → Deploy from GitHub repo** and pick this repo. Railway
+   installs `requirements.txt` and starts the app using `railway.json`.
+2. In the service's **Settings → Networking**, click **Generate Domain** to get a public URL.
+3. **Add a volume so profiles survive redeploys.** Add a volume to the service (right-click it on the
+   project canvas, or press ⌘K / Ctrl+K and search for "volume") and mount it at `/data`. The app finds Railway volumes on its own
+   and saves profiles there. Without a volume, every redeploy starts everyone from scratch.
+4. **Set a password.** Under **Variables**, add `PAPERTRADER_PASSWORD`. Your browser will ask
+   for it when you open the site (any username works). Without one, anyone with the link can
+   trade and delete your profiles.
+
+Settings the app reads from the environment:
+
+| Variable | What it does |
+| --- | --- |
+| `PORT` | Port to listen on. Railway sets this; when it's set the app listens on all addresses and doesn't try to open a browser. |
+| `PAPERTRADER_PASSWORD` | Require this password to use the site. |
+| `PAPERTRADER_DATA_DIR` | Folder to save profiles in. Defaults to the Railway volume if one is attached, otherwise `profiles/`. |
+
+A `Procfile` is included too, so hosts like Render or Heroku can start it with the same command.
+Yahoo Finance sometimes rate-limits requests from cloud servers; if quotes start failing on the
+hosted site, wait a bit and try again.
+
 ## Notes
 
 - Tickers are Yahoo Finance symbols: `AAPL`, `MSFT`, `SPY`, `BTC-USD`, `SHOP.TO`, and so on.

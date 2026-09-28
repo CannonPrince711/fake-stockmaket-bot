@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import threading
 import webbrowser
@@ -105,10 +107,31 @@ class Trader:
         return {"ok": True}
 
 
-def make_handler(trader: Trader):
+def make_handler(trader: Trader, password: str | None = None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # keep the terminal quiet
             pass
+
+        def authorized(self) -> bool:
+            """With a password set, ask the browser for it (any username works)."""
+            if not password:
+                return True
+            header = self.headers.get("Authorization", "")
+            if header.startswith("Basic "):
+                try:
+                    _, _, given = base64.b64decode(header[6:]).decode().partition(":")
+                except ValueError:
+                    given = ""
+                if hmac.compare_digest(given.encode(), password.encode()):
+                    return True
+            body = b"Password required"
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Fake Stock Market", charset="UTF-8"')
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return False
 
         def send(self, status: int, body: bytes, content_type: str) -> None:
             self.send_response(status)
@@ -128,6 +151,10 @@ def make_handler(trader: Trader):
 
         def do_GET(self):
             url = urlparse(self.path)
+            if url.path == "/healthz":  # for hosting health checks; no password needed
+                return self.send(200, b"ok", "text/plain")
+            if not self.authorized():
+                return
             if url.path == "/":
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/profiles":
@@ -147,6 +174,8 @@ def make_handler(trader: Trader):
                 self.send_json({"error": "Not found"}, 404)
 
         def do_POST(self):
+            if not self.authorized():
+                return
             url = urlparse(self.path)
             length = int(self.headers.get("Content-Length") or 0)
             try:
@@ -172,14 +201,21 @@ def make_handler(trader: Trader):
 
 
 def make_server(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, prices=None,
-                start_profile: str = DEFAULT_PROFILE) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), make_handler(Trader(profiles, prices, start_profile)))
+                start_profile: str = DEFAULT_PROFILE, password: str | None = None) -> ThreadingHTTPServer:
+    handler = make_handler(Trader(profiles, prices, start_profile), password)
+    return ThreadingHTTPServer((host, port), handler)
 
 
-def serve(profiles: Profiles, port: int = 8000, open_browser: bool = True, start_profile: str = DEFAULT_PROFILE) -> None:
-    server = make_server(profiles, port=port, start_profile=start_profile)
-    url = f"http://127.0.0.1:{server.server_address[1]}"
-    print(f"Fake Stock Market running at {url}  (Ctrl+C to stop)")
+def serve(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, open_browser: bool = True,
+          start_profile: str = DEFAULT_PROFILE, password: str | None = None) -> None:
+    server = make_server(profiles, host=host, port=port, start_profile=start_profile, password=password)
+    port = server.server_address[1]
+    url = f"http://127.0.0.1:{port}" if host in ("0.0.0.0", "::", "") else f"http://{host}:{port}"
+    print(f"Fake Stock Market listening on {host}:{port}, open {url}  (Ctrl+C to stop)", flush=True)
+    print(f"Saving profiles in {profiles.dir.resolve()}", flush=True)
+    if host not in ("127.0.0.1", "localhost") and not password:
+        print("Warning: anyone who can reach this address can trade and delete profiles. "
+              "Set PAPERTRADER_PASSWORD to require a password.", flush=True)
     if open_browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()
     try:
