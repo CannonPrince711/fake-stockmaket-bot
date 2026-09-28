@@ -68,7 +68,7 @@ class Portfolio:
             "side": side,
             "symbol": symbol,
             "shares": shares,
-            "price": round(price, 4),
+            "price": round(price, 8),
             "total": total,
         }
         self.history.append(trade)

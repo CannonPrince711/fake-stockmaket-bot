@@ -94,6 +94,9 @@
              background: linear-gradient(135deg, #6366f1, #8b5cf6); }
   .primary:hover:not(:disabled) { filter: brightness(1.08); }
   .picks { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .market-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+  .pick small { font-weight: 500; opacity: .75; margin-left: 4px; }
+  .sym small { font-weight: 500; letter-spacing: 0; margin-left: 6px; text-transform: none; }
   .pick { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 4px 11px;
           font-size: 12.5px; font-weight: 600; color: var(--muted); }
   .pick:hover:not(:disabled), .pick.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
@@ -286,10 +289,17 @@
       <form class="search" id="search" autocomplete="off">
         <div class="search-box">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-          <input id="symbol" placeholder="Search a ticker, like AAPL" aria-label="Ticker symbol">
+          <input id="symbol" placeholder="Search a ticker, like AAPL or BTC-USD" aria-label="Ticker symbol">
         </div>
         <button class="primary" type="submit">Look up</button>
       </form>
+      <div class="market-row">
+        <div class="ranges" id="market">
+          <button type="button" data-market="stocks" class="active">Stocks</button>
+          <button type="button" data-market="crypto">Crypto</button>
+        </div>
+        <span class="h-sub" id="market-hint">US stocks and ETFs</span>
+      </div>
       <div class="picks" id="picks"></div>
 
       <div class="quote" id="quote">
@@ -338,9 +348,21 @@ const tone = (n) => (n > 0.005 ? "up" : n < -0.005 ? "down" : "");
 const qty = (n) => n.toLocaleString("en-US", { maximumFractionDigits: 6 });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const PALETTE = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#ef4444", "#84cc16"];
-const PICKS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "SPY"];
+const PICKS = {
+  stocks: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "SPY"],
+  crypto: ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "LTC-USD"],
+};
+const CRYPTO_NAMES = { "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "SOL-USD": "Solana", "XRP-USD": "XRP",
+  "DOGE-USD": "Dogecoin", "ADA-USD": "Cardano", "LTC-USD": "Litecoin" };
+// Yahoo lists crypto as COIN-USD; everything else is treated as a stock.
+const isCrypto = (s) => /-USD$/.test(s || "");
+const short = (s) => (isCrypto(s) ? s.slice(0, -4) : s);
+const units = (s, n) => (isCrypto(s) ? (n === 1 ? "coin" : "coins") : n === 1 ? "share" : "shares");
+// Prices under $1 (like DOGE) get more decimals so they don't all read $0.00.
+const price = (n) => Math.abs(n) >= 1 || n === 0 ? money(n)
+  : "$" + n.toLocaleString("en-US", { maximumSignificantDigits: 4, minimumSignificantDigits: 2 });
 
-const state = { portfolio: null, symbol: null, price: null, side: "buy", period: "1mo", colors: {}, profile: null, profiles: [] };
+const state = { market: "stocks", portfolio: null, symbol: null, price: null, side: "buy", period: "1mo", colors: {}, profile: null, profiles: [] };
 const PRESETS = [["$10K", 10000], ["$50K", 50000], ["$100K", 100000], ["$1M", 1000000]];
 const store = {
   get() { try { return localStorage.getItem("papertrader.profile"); } catch { return null; } },
@@ -396,7 +418,7 @@ async function refresh() {
 }
 
 function renderDonut(p) {
-  const slices = p.holdings.map((h) => ({ label: h.symbol, value: h.value, color: colorFor(h.symbol) }));
+  const slices = p.holdings.map((h) => ({ label: short(h.symbol), value: h.value, color: colorFor(h.symbol) }));
   if (p.cash > 0) slices.push({ label: "Cash", value: p.cash, color: "var(--line)" });
   const total = slices.reduce((s, x) => s + x.value, 0) || 1;
   const r = 15.9155, c = 2 * Math.PI * r;  // circumference = 100
@@ -429,10 +451,10 @@ function renderHoldings(p) {
     const plPct = h.avg_cost ? ((h.price - h.avg_cost) / h.avg_cost) * 100 : 0;
     return `
     <div class="holding" data-symbol="${esc(h.symbol)}" title="Trade ${esc(h.symbol)}">
-      <div class="avatar" style="background:${colorFor(h.symbol)}">${esc(h.symbol.slice(0, 4))}</div>
+      <div class="avatar" style="background:${colorFor(h.symbol)}">${esc(short(h.symbol).slice(0, 4))}</div>
       <div>
-        <div class="h-name">${esc(h.symbol)}</div>
-        <div class="h-sub">${qty(h.shares)} shares · avg ${money(h.avg_cost)}</div>
+        <div class="h-name">${esc(short(h.symbol))}${isCrypto(h.symbol) ? ` <span class="h-sub">${esc(CRYPTO_NAMES[h.symbol] || "Crypto")}</span>` : ""}</div>
+        <div class="h-sub">${qty(h.shares)} ${units(h.symbol, h.shares)} · avg ${price(h.avg_cost)}</div>
       </div>
       <div class="h-right">
         <div class="h-value">${money(h.value)}</div>
@@ -446,14 +468,14 @@ function renderHoldings(p) {
 function renderHistory(p) {
   $("history").innerHTML = p.history.length ? `
     <table>
-      <tr><th>When</th><th>Stock</th><th>Side</th><th>Shares</th><th>Price</th><th>Total</th></tr>
+      <tr><th>When</th><th>Asset</th><th>Side</th><th>Amount</th><th>Price</th><th>Total</th></tr>
       ${p.history.map((t) => `
         <tr>
           <td>${new Date(t.time).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
-          <td><strong>${esc(t.symbol)}</strong></td>
+          <td><strong>${esc(short(t.symbol))}</strong></td>
           <td><span class="tag ${t.side}">${t.side}</span></td>
           <td>${qty(t.shares)}</td>
-          <td>${money(t.price)}</td>
+          <td>${price(t.price)}</td>
           <td><strong>${money(t.total)}</strong></td>
         </tr>`).join("")}
     </table>` : `<div class="empty">Your trades will show up here.</div>`;
@@ -465,7 +487,9 @@ async function lookUp(symbol) {
   symbol = symbol.trim().toUpperCase();
   if (!symbol) return toast("Type a ticker first, like AAPL.", false);
   $("symbol").value = symbol;
-  document.querySelectorAll(".pick").forEach((b) => b.classList.toggle("active", b.dataset.symbol === symbol));
+  state.market = isCrypto(symbol) ? "crypto" : "stocks";
+  state.symbol = symbol;
+  renderPicks();
   $("quote").innerHTML = `<div class="quote-empty"><span class="skeleton">Loading ${esc(symbol)}…</span></div>`;
   try {
     const q = await api("/api/quote?symbol=" + encodeURIComponent(symbol));
@@ -489,8 +513,8 @@ function renderQuote() {
   $("quote").innerHTML = `
     <div class="quote-head">
       <div>
-        <div class="sym">${esc(s)}</div>
-        <div class="price">${money(state.price)}</div>
+        <div class="sym">${esc(short(s))}${isCrypto(s) ? `<small>${esc(CRYPTO_NAMES[s] || "Crypto")} · USD</small>` : ""}</div>
+        <div class="price">${price(state.price)}</div>
         <div class="chip" id="period-change">&nbsp;</div>
       </div>
       <div class="ranges" id="ranges">
@@ -505,7 +529,7 @@ function renderQuote() {
         <button type="button" class="sell" data-side="sell">Sell</button>
       </div>
       <div class="field">
-        <label for="shares">Shares</label>
+        <label for="shares">${isCrypto(s) ? "Coins" : "Shares"}</label>
         <div style="display:flex;align-items:center;gap:6px">
           <input id="shares" type="number" min="0" step="any" placeholder="0" inputmode="decimal">
           <button type="button" class="max" id="max">Max</button>
@@ -526,10 +550,10 @@ function renderTicket() {
   document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.side === state.side));
   const shares = parseFloat($("shares").value) || 0;
   $("est").textContent = money(shares * state.price);
-  $("avail-label").textContent = buy ? "Cash available" : "Shares you own";
+  $("avail-label").textContent = buy ? "Cash available" : isCrypto(state.symbol) ? "Coins you own" : "Shares you own";
   $("avail").textContent = buy ? money(state.portfolio?.cash ?? 0) : qty(owned(state.symbol));
   $("submit").className = "submit " + state.side;
-  $("submit").textContent = `${buy ? "Buy" : "Sell"} ${shares ? qty(shares) + " " : ""}${state.symbol}`;
+  $("submit").textContent = `${buy ? "Buy" : "Sell"} ${shares ? qty(shares) + " " : ""}${short(state.symbol)}`;
 }
 
 async function loadChart() {
@@ -558,7 +582,7 @@ function drawChart(points) {
   if (chip) {
     chip.className = "chip " + tone(diff);
     const label = { "5d": "past 5 days", "1mo": "past month", "6mo": "past 6 months", "1y": "past year" }[state.period];
-    chip.textContent = `${diff >= 0 ? "▲" : "▼"} ${signed(diff)} (${pctText((diff / first) * 100)}) ${label}`;
+    chip.textContent = `${diff >= 0 ? "▲" : "▼"} ${diff >= 0 ? "+" : "−"}${price(Math.abs(diff))} (${pctText((diff / first) * 100)}) ${label}`;
   }
   el.innerHTML = `
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
@@ -580,7 +604,7 @@ function drawChart(points) {
     cursor.setAttribute("x1", x(points.indexOf(p))); cursor.setAttribute("x2", x(points.indexOf(p)));
     cursor.setAttribute("visibility", "visible");
     const d = new Date(p.time);
-    tip.textContent = `${money(p.close)} · ${daily ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
+    tip.textContent = `${price(p.close)} · ${daily ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
     tip.style.left = Math.min(Math.max(px, 60), rect.width - 60) + "px";
     tip.style.display = "block";
   };
@@ -597,8 +621,22 @@ async function busy(fn) {
 
 /* ---------- Events ---------- */
 
-$("picks").innerHTML = PICKS.map((s) => `<button type="button" class="pick" data-symbol="${s}">${s}</button>`).join("");
-$("picks").addEventListener("click", (e) => e.target.dataset.symbol && lookUp(e.target.dataset.symbol));
+function renderPicks() {
+  document.querySelectorAll("#market button").forEach((b) => b.classList.toggle("active", b.dataset.market === state.market));
+  $("market-hint").textContent = state.market === "crypto" ? "Trades 24/7 · buy fractions of a coin" : "US stocks and ETFs";
+  $("picks").innerHTML = PICKS[state.market].map((s) => `<button type="button" class="pick${s === state.symbol ? " active" : ""}" data-symbol="${s}">${
+    isCrypto(s) ? `${short(s)}<small>${CRYPTO_NAMES[s]}</small>` : s}</button>`).join("");
+}
+renderPicks();
+$("market").addEventListener("click", (e) => {
+  if (!e.target.dataset.market) return;
+  state.market = e.target.dataset.market;
+  renderPicks();
+});
+$("picks").addEventListener("click", (e) => {
+  const b = e.target.closest(".pick");
+  if (b) lookUp(b.dataset.symbol);
+});
 $("search").addEventListener("submit", (e) => { e.preventDefault(); lookUp($("symbol").value); });
 
 $("holdings").addEventListener("click", (e) => {
@@ -620,7 +658,7 @@ $("quote").addEventListener("click", (e) => {
     state.side = t.dataset.side;
     renderTicket();
   } else if (t.id === "max") {
-    const max = state.side === "buy" ? Math.floor(((state.portfolio?.cash ?? 0) / state.price) * 1e4) / 1e4 : owned(state.symbol);
+    const max = state.side === "buy" ? Math.floor(((state.portfolio?.cash ?? 0) / state.price) * 1e6) / 1e6 : owned(state.symbol);
     $("shares").value = max || "";
     renderTicket();
   }
@@ -633,10 +671,10 @@ $("quote").addEventListener("submit", (e) => {
   busy(async () => {
     const t = await api("/api/" + state.side, { profile: state.profile, symbol: state.symbol, shares });
     state.price = t.price;
-    toast(`${t.side === "BUY" ? "Bought" : "Sold"} ${qty(t.shares)} ${t.symbol} for ${money(t.total)}`);
+    toast(`${t.side === "BUY" ? "Bought" : "Sold"} ${qty(t.shares)} ${short(t.symbol)} for ${money(t.total)}`);
     $("shares").value = "";
     await refresh();
-    document.querySelector(".price").textContent = money(state.price);
+    document.querySelector(".price").textContent = price(state.price);
   });
 });
 
