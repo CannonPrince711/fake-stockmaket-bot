@@ -175,8 +175,8 @@
   .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 0 var(--up); animation: pulse 2s infinite; }
   .live.off i { background: var(--muted); animation: none; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--up-soft); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
-  .flash-up { animation: flashUp 1.2s ease; }
-  .flash-down { animation: flashDown 1.2s ease; }
+  .flash-up { animation: flashUp .8s ease; }
+  .flash-down { animation: flashDown .8s ease; }
   @keyframes flashUp { 0% { background: var(--up-soft); color: var(--up); } 100% { background: transparent; } }
   @keyframes flashDown { 0% { background: var(--down-soft); color: var(--down); } 100% { background: transparent; } }
   .price, .h-value, .big { border-radius: 8px; }
@@ -424,7 +424,9 @@ async function refresh() {
 
   renderDonut(p);
   renderHoldings(p);
-  renderHistory(p);
+  // History only changes on a trade, so skip rebuilding it on every one-second refresh.
+  const historyKey = p.profile + ":" + p.history.length;
+  if (historyKey !== state.historyKey) { state.historyKey = historyKey; renderHistory(p); }
   renderTicket();
 }
 
@@ -634,7 +636,7 @@ async function busy(fn) {
 
 /* ---------- Live refresh ---------- */
 
-const REFRESH_MS = 5000;
+const REFRESH_MS = 1000;
 const lastSeen = {};
 let polling = false, lastUpdate = Date.now(), liveOk = true;
 

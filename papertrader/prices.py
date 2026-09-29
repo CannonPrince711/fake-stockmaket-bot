@@ -58,13 +58,13 @@ class YahooPrices:
 
 
 class CachedPrices:
-    """Wraps a price source and remembers each price for a few seconds.
+    """Wraps a price source and remembers each price for just under a second.
 
-    The web page asks for prices every few seconds, possibly from several tabs; this keeps
+    The web page asks for prices every second, possibly from several tabs; this keeps
     those requests fast and stops us hammering Yahoo with identical lookups.
     """
 
-    def __init__(self, source, ttl: float = 3.0, clock=time.monotonic):
+    def __init__(self, source, ttl: float = 0.9, clock=time.monotonic):
         self.source = source
         self.ttl = ttl
         self.clock = clock
