@@ -90,6 +90,7 @@ profile called `default`, and `--cash` only matters when a profile is first crea
 | `quote SYMBOL [SYMBOL ...]` | Show the current price |
 | `buy SYMBOL AMOUNT` | Buy shares or coins at the current price (fractions are fine) |
 | `sell SYMBOL AMOUNT` or `sell SYMBOL all` | Sell at the current price |
+| `stocks` | List popular stocks and ETFs |
 | `crypto` | List popular cryptocurrencies you can trade |
 | `portfolio` | Cash, holdings, and profit/loss |
 | `history` | Every trade you've made |
@@ -139,7 +140,9 @@ python -m papertrader buy BTC-USD 0.05
 python -m papertrader buy DOGE-USD 10000
 ```
 
-In the browser, switch the quick picks to **Crypto** to see popular coins. Crypto prices update
+In the browser, switch the quick picks to **Crypto** to see popular coins, and click **+ more**
+to see the full list. The search box also suggests popular stocks and coins as you type, and
+understands names like "Apple" or "Bitcoin". Crypto prices update
 around the clock, including weekends. Note that a plain `BTC` is a stock ticker (a Bitcoin ETF),
 not Bitcoin itself, so use `BTC-USD` for the coin.
 

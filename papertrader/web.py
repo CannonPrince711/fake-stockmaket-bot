@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from . import catalog
 from .portfolio import Portfolio, TradeError
 from .prices import CachedPrices, PriceError, YahooPrices
 from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
@@ -159,6 +160,8 @@ def make_handler(trader: Trader, password: str | None = None):
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/profiles":
                 self.handle_api(trader.list_profiles)
+            elif url.path == "/api/catalog":
+                self.send_json({"stocks": catalog.STOCKS, "crypto": catalog.CRYPTO})
             elif url.path == "/api/portfolio":
                 profile = parse_qs(url.query).get("profile", [trader.start_profile])[0]
                 self.handle_api(lambda: trader.summary(profile))

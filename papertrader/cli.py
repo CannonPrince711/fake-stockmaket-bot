@@ -8,6 +8,7 @@ import shlex
 import sys
 from pathlib import Path
 
+from . import catalog
 from .portfolio import Portfolio, TradeError
 from .prices import PriceError, YahooPrices
 from .profiles import DEFAULT_DIR, DEFAULT_PROFILE, LEGACY_FILE, Profiles, parse_cash
@@ -16,6 +17,7 @@ HELP = """Commands:
   quote SYMBOL [SYMBOL ...]   show the current real-world price
   buy SYMBOL AMOUNT           buy shares (or coins) at the current price
   sell SYMBOL AMOUNT|all      sell shares (or coins) at the current price
+  stocks                      list popular stocks and ETFs
   crypto                      list popular cryptocurrencies you can trade
   portfolio                   show cash, holdings and profit/loss
   history                     show every trade you've made
@@ -76,9 +78,15 @@ class App:
 
     def cmd_crypto(self, rest):
         self.say("Popular cryptocurrencies (use these tickers to quote, buy and sell):")
-        for symbol, name in POPULAR_CRYPTO.items():
+        for symbol, name in catalog.CRYPTO.items():
             self.say(f"  {symbol:<10} {name}")
         self.say("Any coin Yahoo Finance lists as COIN-USD works too.")
+
+    def cmd_stocks(self, rest):
+        self.say("Popular stocks and ETFs (use these tickers to quote, buy and sell):")
+        for symbol, name in catalog.STOCKS.items():
+            self.say(f"  {symbol:<10} {name}")
+        self.say("Any ticker Yahoo Finance lists works too.")
 
     def cmd_buy(self, rest):
         symbol, shares = self._symbol_and_shares(rest, "buy")
@@ -193,11 +201,6 @@ def default_data_dir() -> Path:
             return Path(os.environ[var])
     return DEFAULT_DIR
 
-
-POPULAR_CRYPTO = {
-    "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "SOL-USD": "Solana", "XRP-USD": "XRP",
-    "DOGE-USD": "Dogecoin", "ADA-USD": "Cardano", "LTC-USD": "Litecoin",
-}
 
 
 def money(amount: float) -> str:
