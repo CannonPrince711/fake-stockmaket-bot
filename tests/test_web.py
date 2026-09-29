@@ -39,7 +39,8 @@ def test_page_is_served(server):
 
 
 def test_buy_quote_and_portfolio(server):
-    assert call(server, "/api/quote?symbol=aapl") == (200, {"symbol": "AAPL", "price": 200.0})
+    status, quote = call(server, "/api/quote?symbol=aapl")
+    assert status == 200 and quote["symbol"] == "AAPL" and quote["price"] == 200.0
     status, trade = call(server, "/api/buy", {"symbol": "aapl", "shares": "10"})
     assert status == 200 and trade["total"] == 2000
     server.prices.prices["AAPL"] = 250.0
@@ -145,3 +146,11 @@ def test_trade_uses_latest_price_not_cache(server):
     server.prices.prices["AAPL"] = 300.0
     _, trade = call(server, "/api/buy", {"symbol": "AAPL", "shares": 1})
     assert trade["price"] == 300.0
+
+
+def test_catalog(server):
+    status, data = call(server, "/api/catalog")
+    assert status == 200
+    assert data["stocks"]["AAPL"] == "Apple" and data["crypto"]["BTC-USD"] == "Bitcoin"
+    assert len(data["stocks"]) >= 20 and len(data["crypto"]) >= 15
+    assert all(s.endswith("-USD") for s in data["crypto"])

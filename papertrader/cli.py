@@ -8,14 +8,19 @@ import shlex
 import sys
 from pathlib import Path
 
+from . import catalog
 from .portfolio import Portfolio, TradeError
-from .prices import PriceError, YahooPrices
+from .prices import PriceError
+from .sources import build_sources, load_preference, save_preference
 from .profiles import DEFAULT_DIR, DEFAULT_PROFILE, LEGACY_FILE, Profiles, parse_cash
 
 HELP = """Commands:
   quote SYMBOL [SYMBOL ...]   show the current real-world price
   buy SYMBOL AMOUNT           buy shares (or coins) at the current price
   sell SYMBOL AMOUNT|all      sell shares (or coins) at the current price
+  source [NAME]               show or switch where prices come from (auto, yahoo,
+                              finnhub, coingecko, stooq)
+  stocks                      list popular stocks and ETFs
   crypto                      list popular cryptocurrencies you can trade
   portfolio                   show cash, holdings and profit/loss
   history                     show every trade you've made
@@ -36,7 +41,12 @@ and you can buy fractions, e.g. buy BTC-USD 0.05
 class App:
     def __init__(self, profiles: Profiles, profile: str = DEFAULT_PROFILE, cash=None, prices=None, out=sys.stdout):
         self.profiles = profiles
-        self.prices = prices or YahooPrices()
+        self.prices = prices or build_sources()
+        if hasattr(self.prices, "set_preferred"):
+            try:
+                self.prices.set_preferred(load_preference(profiles.dir))
+            except PriceError:
+                pass  # e.g. Finnhub was chosen but its key has since been removed
         self.out = out
         self.profile = profiles.ensure(profile, cash)
         self.portfolio = profiles.load(self.profile)
@@ -76,9 +86,31 @@ class App:
 
     def cmd_crypto(self, rest):
         self.say("Popular cryptocurrencies (use these tickers to quote, buy and sell):")
-        for symbol, name in POPULAR_CRYPTO.items():
+        for symbol, name in catalog.CRYPTO.items():
             self.say(f"  {symbol:<10} {name}")
         self.say("Any coin Yahoo Finance lists as COIN-USD works too.")
+
+    def cmd_source(self, rest):
+        if not hasattr(self.prices, "describe"):
+            raise TradeError("This price source can't be switched")
+        if rest:
+            self.prices.set_preferred(rest[0])
+            save_preference(self.profiles.dir, self.prices.preferred)
+        info = self.prices.describe()
+        self.say("Price sources (the chosen one is tried first, the others are backups):")
+        mark = "*" if info["preferred"] == "auto" else " "
+        self.say(f"{mark} {'auto':<10} Yahoo first, then the others")
+        for s in info["sources"]:
+            mark = "*" if s["id"] == info["preferred"] else " "
+            off = "" if s["enabled"] else "  [off]"
+            self.say(f"{mark} {s['id']:<10} {s['name']}: {s['covers']}{off}")
+        self.say("Switch with: source NAME   (e.g. source coingecko, or source auto)")
+
+    def cmd_stocks(self, rest):
+        self.say("Popular stocks and ETFs (use these tickers to quote, buy and sell):")
+        for symbol, name in catalog.STOCKS.items():
+            self.say(f"  {symbol:<10} {name}")
+        self.say("Any ticker Yahoo Finance lists works too.")
 
     def cmd_buy(self, rest):
         symbol, shares = self._symbol_and_shares(rest, "buy")
@@ -193,11 +225,6 @@ def default_data_dir() -> Path:
             return Path(os.environ[var])
     return DEFAULT_DIR
 
-
-POPULAR_CRYPTO = {
-    "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "SOL-USD": "Solana", "XRP-USD": "XRP",
-    "DOGE-USD": "Dogecoin", "ADA-USD": "Cardano", "LTC-USD": "Litecoin",
-}
 
 
 def money(amount: float) -> str:

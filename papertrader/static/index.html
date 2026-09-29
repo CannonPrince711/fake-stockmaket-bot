@@ -95,6 +95,12 @@
   .primary:hover:not(:disabled) { filter: brightness(1.08); }
   .picks { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .market-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+  .src-pick { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .src-pick select { font: inherit; font-weight: 650; color: var(--text); background: var(--card-2); border: 1px solid var(--line);
+                     border-radius: 9px; padding: 5px 8px; outline: 0; cursor: pointer; max-width: 170px; }
+  .src-pick select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .source { font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
+  .pick.more { border-style: dashed; }
   .pick small { font-weight: 500; opacity: .75; margin-left: 4px; }
   .sym small { font-weight: 500; letter-spacing: 0; margin-left: 6px; text-transform: none; }
   .pick { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 4px 11px;
@@ -175,8 +181,8 @@
   .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 0 var(--up); animation: pulse 2s infinite; }
   .live.off i { background: var(--muted); animation: none; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--up-soft); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
-  .flash-up { animation: flashUp 1.2s ease; }
-  .flash-down { animation: flashDown 1.2s ease; }
+  .flash-up { animation: flashUp .8s ease; }
+  .flash-down { animation: flashDown .8s ease; }
   @keyframes flashUp { 0% { background: var(--up-soft); color: var(--up); } 100% { background: transparent; } }
   @keyframes flashDown { 0% { background: var(--down-soft); color: var(--down); } 100% { background: transparent; } }
   .price, .h-value, .big { border-radius: 8px; }
@@ -295,11 +301,16 @@
 
   <div class="grid">
     <section class="card panel">
-      <div class="panel-head"><h2 class="card-title">Trade</h2></div>
+      <div class="panel-head"><h2 class="card-title">Trade</h2>
+        <label class="src-pick" id="src-pick" hidden title="Where prices come from. The others are used as backups.">Prices from
+          <select id="source-select"></select>
+        </label>
+      </div>
       <form class="search" id="search" autocomplete="off">
         <div class="search-box">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-          <input id="symbol" placeholder="Search a ticker, like AAPL or BTC-USD" aria-label="Ticker symbol">
+          <input id="symbol" list="catalog" placeholder="Search a ticker or name, like Apple or BTC-USD" aria-label="Ticker symbol">
+          <datalist id="catalog"></datalist>
         </div>
         <button class="primary" type="submit">Look up</button>
       </form>
@@ -358,12 +369,10 @@ const tone = (n) => (n > 0.005 ? "up" : n < -0.005 ? "down" : "");
 const qty = (n) => n.toLocaleString("en-US", { maximumFractionDigits: 6 });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const PALETTE = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#ef4444", "#84cc16"];
-const PICKS = {
-  stocks: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "SPY"],
-  crypto: ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "LTC-USD"],
-};
-const CRYPTO_NAMES = { "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "SOL-USD": "Solana", "XRP-USD": "XRP",
-  "DOGE-USD": "Dogecoin", "ADA-USD": "Cardano", "LTC-USD": "Litecoin" };
+// Popular tickers and their names, loaded from /api/catalog.
+const CATALOG = { stocks: {}, crypto: {} };
+const CRYPTO_NAMES = CATALOG.crypto;
+const PICKS_SHOWN = 10;
 // Yahoo lists crypto as COIN-USD; everything else is treated as a stock.
 const isCrypto = (s) => /-USD$/.test(s || "");
 const short = (s) => (isCrypto(s) ? s.slice(0, -4) : s);
@@ -424,7 +433,9 @@ async function refresh() {
 
   renderDonut(p);
   renderHoldings(p);
-  renderHistory(p);
+  // History only changes on a trade, so skip rebuilding it on every one-second refresh.
+  const historyKey = p.profile + ":" + p.history.length;
+  if (historyKey !== state.historyKey) { state.historyKey = historyKey; renderHistory(p); }
   renderTicket();
 }
 
@@ -506,6 +517,7 @@ async function lookUp(symbol) {
     const q = await api("/api/quote?symbol=" + encodeURIComponent(symbol));
     state.symbol = q.symbol;
     state.price = q.price;
+    state.source = q.source;
     lastSeen["q:" + q.symbol] = q.price;
     renderQuote();
     loadChart();
@@ -527,6 +539,7 @@ function renderQuote() {
       <div>
         <div class="sym">${esc(short(s))}${isCrypto(s) ? `<small>${esc(CRYPTO_NAMES[s] || "Crypto")} · USD</small>` : ""}</div>
         <div class="price">${price(state.price)}</div>
+        <div class="source" id="quote-source">${state.source ? "via " + esc(state.source) : ""}</div>
         <div class="chip" id="period-change">&nbsp;</div>
       </div>
       <div class="ranges" id="ranges">
@@ -634,7 +647,7 @@ async function busy(fn) {
 
 /* ---------- Live refresh ---------- */
 
-const REFRESH_MS = 5000;
+const REFRESH_MS = 1000;
 const lastSeen = {};
 let polling = false, lastUpdate = Date.now(), liveOk = true;
 
@@ -670,7 +683,12 @@ async function tick() {
       refresh(),
       symbol ? api("/api/quote?symbol=" + encodeURIComponent(symbol)) : null,
     ]);
-    if (q && q.symbol === state.symbol) updateQuotePrice(q.price);
+    if (q && q.symbol === state.symbol) {
+      updateQuotePrice(q.price);
+      state.source = q.source;
+      const src = $("quote-source");
+      if (src) src.textContent = q.source ? "via " + q.source : "";
+    }
     lastUpdate = Date.now();
     liveOk = true;
   } catch {
@@ -696,10 +714,60 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) tick
 function renderPicks() {
   document.querySelectorAll("#market button").forEach((b) => b.classList.toggle("active", b.dataset.market === state.market));
   $("market-hint").textContent = state.market === "crypto" ? "Trades 24/7 · buy fractions of a coin" : "US stocks and ETFs";
-  $("picks").innerHTML = PICKS[state.market].map((s) => `<button type="button" class="pick${s === state.symbol ? " active" : ""}" data-symbol="${s}">${
-    isCrypto(s) ? `${short(s)}<small>${CRYPTO_NAMES[s]}</small>` : s}</button>`).join("");
+  const all = Object.keys(CATALOG[state.market]);
+  // Keep the selected ticker visible even when the list is collapsed.
+  let shown = state.showAll ? all : all.slice(0, PICKS_SHOWN);
+  if (state.symbol && all.includes(state.symbol) && !shown.includes(state.symbol)) shown = [...shown, state.symbol];
+  $("picks").innerHTML = shown.map((s) => `<button type="button" class="pick${s === state.symbol ? " active" : ""}" data-symbol="${s}" title="${esc(CATALOG[state.market][s])}">${
+    isCrypto(s) ? `${short(s)}<small>${esc(CRYPTO_NAMES[s])}</small>` : s}</button>`).join("")
+    + (all.length > PICKS_SHOWN ? `<button type="button" class="pick more" data-more="1">${state.showAll ? "Show fewer" : `+${all.length - PICKS_SHOWN} more`}</button>` : "");
 }
-renderPicks();
+
+// Let people type a name ("apple", "bitcoin") instead of a ticker. Short codes like "ETH" or "SOL"
+// are left alone because they're also real stock tickers.
+function resolveTicker(text) {
+  const q = text.trim().toLowerCase();
+  const entries = [...Object.entries(CATALOG.stocks), ...Object.entries(CATALOG.crypto)];
+  const byName = entries.find(([, name]) => name.toLowerCase() === q || name.toLowerCase().split(" (")[0] === q);
+  return byName ? byName[0] : text;
+}
+
+/* ---------- Price source picker ---------- */
+
+function renderSources(info) {
+  $("source-select").innerHTML = `<option value="auto">Auto (Yahoo, then backups)</option>` + info.sources.map((s) =>
+    `<option value="${esc(s.id)}"${s.enabled ? "" : " disabled"} title="${esc(s.covers)}">${esc(s.name)}${
+      s.enabled ? "" : " (needs API key)"}</option>`).join("");
+  $("source-select").value = info.preferred;
+  $("src-pick").hidden = false;
+}
+
+api("/api/sources").then(renderSources).catch(() => {});  // hidden if the server can't switch
+
+$("source-select").addEventListener("change", (e) => {
+  const choice = e.target.value;
+  busy(async () => {
+    try {
+      const info = await api("/api/sources", { source: choice });
+      renderSources(info);
+      const picked = info.sources.find((s) => s.id === info.preferred);
+      toast(picked ? `Prices now come from ${picked.name} first` : "Prices back on Auto");
+      await refresh();
+      if (state.symbol) await lookUp(state.symbol);
+    } catch (err) {
+      api("/api/sources").then(renderSources).catch(() => {});
+      throw err;
+    }
+  });
+});
+
+api("/api/catalog").then((c) => {
+  Object.assign(CATALOG.stocks, c.stocks);
+  Object.assign(CATALOG.crypto, c.crypto);
+  $("catalog").innerHTML = [...Object.entries(c.stocks), ...Object.entries(c.crypto)]
+    .map(([s, name]) => `<option value="${esc(s)}">${esc(name)}</option>`).join("");
+  renderPicks();
+}).catch(() => {});
 $("market").addEventListener("click", (e) => {
   if (!e.target.dataset.market) return;
   state.market = e.target.dataset.market;
@@ -707,9 +775,11 @@ $("market").addEventListener("click", (e) => {
 });
 $("picks").addEventListener("click", (e) => {
   const b = e.target.closest(".pick");
-  if (b) lookUp(b.dataset.symbol);
+  if (!b) return;
+  if (b.dataset.more) { state.showAll = !state.showAll; renderPicks(); }
+  else lookUp(b.dataset.symbol);
 });
-$("search").addEventListener("submit", (e) => { e.preventDefault(); lookUp($("symbol").value); });
+$("search").addEventListener("submit", (e) => { e.preventDefault(); lookUp(resolveTicker($("symbol").value)); });
 
 $("holdings").addEventListener("click", (e) => {
   const row = e.target.closest(".holding");

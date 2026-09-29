@@ -11,8 +11,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from . import catalog
 from .portfolio import Portfolio, TradeError
-from .prices import CachedPrices, PriceError, YahooPrices
+from .prices import CachedPrices, PriceError
+from .sources import build_sources, load_preference, save_preference
 from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
 
 PAGE = Path(__file__).with_name("static") / "index.html"
@@ -21,11 +23,32 @@ PAGE = Path(__file__).with_name("static") / "index.html"
 class Trader:
     """All profiles plus a price source, safe to use from several requests at once."""
 
-    def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE, price_ttl: float = 3.0):
+    def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE, price_ttl: float = 0.9):
         self.profiles = profiles
-        self.prices = CachedPrices(prices or YahooPrices(), ttl=price_ttl)
+        self.prices = CachedPrices(prices or build_sources(), ttl=price_ttl)
         self.lock = threading.Lock()
         self.start_profile = profiles.ensure(start_profile)
+        chooser = self.prices.source
+        if hasattr(chooser, "set_preferred"):
+            try:
+                chooser.set_preferred(load_preference(profiles.dir))
+            except PriceError:
+                pass  # e.g. Finnhub was chosen but its key has since been removed
+
+    def price_sources(self) -> dict:
+        chooser = self.prices.source
+        if not hasattr(chooser, "describe"):
+            raise PriceError("This server's price source can't be switched")
+        return chooser.describe()
+
+    def set_price_source(self, key: str) -> dict:
+        chooser = self.prices.source
+        if not hasattr(chooser, "set_preferred"):
+            raise PriceError("This server's price source can't be switched")
+        chooser.set_preferred(key)
+        save_preference(self.profiles.dir, chooser.preferred)
+        self.prices.clear()
+        return chooser.describe()
 
     def list_profiles(self) -> dict:
         with self.lock:
@@ -74,7 +97,8 @@ class Trader:
         return data
 
     def quote(self, symbol: str) -> dict:
-        return {"symbol": symbol.strip().upper(), "price": self.prices.get_price(symbol)}
+        price = self.prices.get_price(symbol)
+        return {"symbol": symbol.strip().upper(), "price": price, "source": self.prices.source_of(symbol)}
 
     def history(self, symbol: str, period: str) -> dict:
         return {"symbol": symbol.strip().upper(), "period": period, "points": self.prices.get_history(symbol, period)}
@@ -159,6 +183,10 @@ def make_handler(trader: Trader, password: str | None = None):
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/profiles":
                 self.handle_api(trader.list_profiles)
+            elif url.path == "/api/sources":
+                self.handle_api(trader.price_sources)
+            elif url.path == "/api/catalog":
+                self.send_json({"stocks": catalog.STOCKS, "crypto": catalog.CRYPTO})
             elif url.path == "/api/portfolio":
                 profile = parse_qs(url.query).get("profile", [trader.start_profile])[0]
                 self.handle_api(lambda: trader.summary(profile))
@@ -192,17 +220,20 @@ def make_handler(trader: Trader, password: str | None = None):
                 self.handle_api(lambda: trader.reset(profile, body.get("cash")))
             elif url.path == "/api/profiles":
                 self.handle_api(lambda: trader.create_profile(str(body.get("name", "")), body.get("cash")))
+            elif url.path == "/api/sources":
+                self.handle_api(lambda: trader.set_price_source(str(body.get("source", ""))))
             elif url.path == "/api/profiles/delete":
                 self.handle_api(lambda: trader.delete_profile(str(body.get("name", ""))))
             else:
                 self.send_json({"error": "Not found"}, 404)
 
+    Handler.trader = trader
     return Handler
 
 
 def make_server(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, prices=None,
                 start_profile: str = DEFAULT_PROFILE, password: str | None = None,
-                price_ttl: float = 3.0) -> ThreadingHTTPServer:
+                price_ttl: float = 0.9) -> ThreadingHTTPServer:
     handler = make_handler(Trader(profiles, prices, start_profile, price_ttl), password)
     return ThreadingHTTPServer((host, port), handler)
 
@@ -214,6 +245,9 @@ def serve(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, open_br
     url = f"http://127.0.0.1:{port}" if host in ("0.0.0.0", "::", "") else f"http://{host}:{port}"
     print(f"Fake Stock Market listening on {host}:{port}, open {url}  (Ctrl+C to stop)", flush=True)
     print(f"Saving profiles in {profiles.dir.resolve()}", flush=True)
+    names = getattr(server.RequestHandlerClass.trader.prices.source, "names", None)
+    if names:
+        print(f"Price sources, in order: {', '.join(names)}", flush=True)
     if host not in ("127.0.0.1", "localhost") and not password:
         print("Warning: anyone who can reach this address can trade and delete profiles. "
               "Set PAPERTRADER_PASSWORD to require a password.", flush=True)
