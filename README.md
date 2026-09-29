@@ -146,6 +146,27 @@ understands names like "Apple" or "Bitcoin". Crypto prices update
 around the clock, including weekends. Note that a plain `BTC` is a stock ticker (a Bitcoin ETF),
 not Bitcoin itself, so use `BTC-USD` for the coin.
 
+## Price sources
+
+Prices come from Yahoo Finance first. If Yahoo is down or rate-limiting, the app automatically
+falls back to other free services, and the page shows which one a price came from ("via Stooq"):
+
+| Source | Covers | Key needed? |
+| --- | --- | --- |
+| Yahoo Finance | Stocks, ETFs, crypto, charts | No |
+| [Finnhub](https://finnhub.io) | Real-time US stock quotes (no charts on the free plan) | Yes, free: sign up at finnhub.io and copy your API key |
+| [CoinGecko](https://www.coingecko.com/en/api) | Crypto prices and charts | No (an optional free demo key gives higher limits) |
+| [Stooq](https://stooq.com) | US stock quotes (can be delayed) and daily charts | No |
+
+A service that's down is skipped for 30 seconds so it doesn't slow down refreshes. To turn on
+Finnhub or change the order, set these (locally, or under **Variables** on Railway):
+
+| Variable | What it does |
+| --- | --- |
+| `FINNHUB_API_KEY` | Adds Finnhub as the first backup for stocks. |
+| `COINGECKO_API_KEY` | Uses your free CoinGecko demo key. |
+| `PAPERTRADER_PRICE_SOURCES` | Which sources to use and in what order, e.g. `finnhub,yahoo,coingecko,stooq`. Default: `yahoo,finnhub,coingecko,stooq`. |
+
 ## Notes
 
 - Tickers are Yahoo Finance symbols: `AAPL`, `MSFT`, `SPY`, `BTC-USD`, `SHOP.TO`, and so on.

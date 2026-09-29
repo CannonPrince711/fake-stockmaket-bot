@@ -1,4 +1,5 @@
-"""Real-world stock prices via Yahoo Finance (the free yfinance library, no API key)."""
+"""Real-world prices. Yahoo Finance (the free yfinance library, no API key) is the main source;
+see sources.py for the backups used when it's down."""
 
 from __future__ import annotations
 
@@ -19,7 +20,16 @@ class PriceError(Exception):
     """Raised when a price can't be looked up (unknown ticker, no network, etc.)."""
 
 
+class SourceDown(PriceError):
+    """The price service itself failed (no network, rate-limited, erroring), not just an unknown ticker."""
+
+
 class YahooPrices:
+    name = "Yahoo Finance"
+
+    def supports(self, symbol: str) -> bool:
+        return True
+
     def get_price(self, symbol: str) -> float:
         import yfinance as yf  # imported lazily so tests don't need it
 
@@ -27,7 +37,7 @@ class YahooPrices:
         try:
             price = yf.Ticker(symbol).fast_info["last_price"]
         except Exception as exc:  # yfinance raises a variety of errors
-            raise PriceError(f"Couldn't get a price for {symbol}: {exc}") from exc
+            raise _yahoo_error(f"Couldn't get a price for {symbol}", exc) from exc
         if price is None or price != price or price <= 0:  # None, NaN or zero
             raise PriceError(f"No price found for {symbol}. Is the ticker right?")
         return float(price)
@@ -43,7 +53,7 @@ class YahooPrices:
         try:
             frame = yf.Ticker(symbol).history(period=period, interval=interval)
         except Exception as exc:
-            raise PriceError(f"Couldn't get price history for {symbol}: {exc}") from exc
+            raise _yahoo_error(f"Couldn't get price history for {symbol}", exc) from exc
         points = [
             {"time": ts.isoformat(), "close": float(close)}
             for ts, close in frame["Close"].items()
@@ -55,6 +65,18 @@ class YahooPrices:
 
     def get_prices(self, symbols) -> dict[str, float]:
         return {s: self.get_price(s) for s in symbols}
+
+
+# Words in yfinance errors that mean Yahoo itself is unreachable or throttling us, rather than
+# the ticker simply not existing.
+_OUTAGE_HINTS = ("rate", "429", "too many", "timed out", "timeout", "connection", "curl", "resolve",
+                 "unauthorized", "401", "403", "500", "502", "503", "ssl", "proxy")
+
+
+def _yahoo_error(message: str, exc: Exception) -> PriceError:
+    text = f"{type(exc).__name__} {exc}".lower()
+    cls = SourceDown if any(hint in text for hint in _OUTAGE_HINTS) else PriceError
+    return cls(f"{message}: {exc}")
 
 
 class CachedPrices:
@@ -104,3 +126,7 @@ class CachedPrices:
 
     def get_history(self, symbol: str, period: str = "1mo") -> list[dict]:
         return self.source.get_history(symbol, period)
+
+    def source_of(self, symbol: str) -> str | None:
+        """Name of the service the latest price for this symbol came from, if known."""
+        return getattr(self.source, "last_source", {}).get(symbol.strip().upper())

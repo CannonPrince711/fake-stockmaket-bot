@@ -39,7 +39,8 @@ def test_page_is_served(server):
 
 
 def test_buy_quote_and_portfolio(server):
-    assert call(server, "/api/quote?symbol=aapl") == (200, {"symbol": "AAPL", "price": 200.0})
+    status, quote = call(server, "/api/quote?symbol=aapl")
+    assert status == 200 and quote["symbol"] == "AAPL" and quote["price"] == 200.0
     status, trade = call(server, "/api/buy", {"symbol": "aapl", "shares": "10"})
     assert status == 200 and trade["total"] == 2000
     server.prices.prices["AAPL"] = 250.0

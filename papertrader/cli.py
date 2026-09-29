@@ -10,7 +10,8 @@ from pathlib import Path
 
 from . import catalog
 from .portfolio import Portfolio, TradeError
-from .prices import PriceError, YahooPrices
+from .prices import PriceError
+from .sources import build_sources
 from .profiles import DEFAULT_DIR, DEFAULT_PROFILE, LEGACY_FILE, Profiles, parse_cash
 
 HELP = """Commands:
@@ -38,7 +39,7 @@ and you can buy fractions, e.g. buy BTC-USD 0.05
 class App:
     def __init__(self, profiles: Profiles, profile: str = DEFAULT_PROFILE, cash=None, prices=None, out=sys.stdout):
         self.profiles = profiles
-        self.prices = prices or YahooPrices()
+        self.prices = prices or build_sources()
         self.out = out
         self.profile = profiles.ensure(profile, cash)
         self.portfolio = profiles.load(self.profile)

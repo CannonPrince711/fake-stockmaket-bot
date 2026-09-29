@@ -13,7 +13,8 @@ from urllib.parse import parse_qs, urlparse
 
 from . import catalog
 from .portfolio import Portfolio, TradeError
-from .prices import CachedPrices, PriceError, YahooPrices
+from .prices import CachedPrices, PriceError
+from .sources import build_sources
 from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
 
 PAGE = Path(__file__).with_name("static") / "index.html"
@@ -24,7 +25,7 @@ class Trader:
 
     def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE, price_ttl: float = 0.9):
         self.profiles = profiles
-        self.prices = CachedPrices(prices or YahooPrices(), ttl=price_ttl)
+        self.prices = CachedPrices(prices or build_sources(), ttl=price_ttl)
         self.lock = threading.Lock()
         self.start_profile = profiles.ensure(start_profile)
 
@@ -75,7 +76,8 @@ class Trader:
         return data
 
     def quote(self, symbol: str) -> dict:
-        return {"symbol": symbol.strip().upper(), "price": self.prices.get_price(symbol)}
+        price = self.prices.get_price(symbol)
+        return {"symbol": symbol.strip().upper(), "price": price, "source": self.prices.source_of(symbol)}
 
     def history(self, symbol: str, period: str) -> dict:
         return {"symbol": symbol.strip().upper(), "period": period, "points": self.prices.get_history(symbol, period)}
@@ -200,6 +202,7 @@ def make_handler(trader: Trader, password: str | None = None):
             else:
                 self.send_json({"error": "Not found"}, 404)
 
+    Handler.trader = trader
     return Handler
 
 
@@ -217,6 +220,9 @@ def serve(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, open_br
     url = f"http://127.0.0.1:{port}" if host in ("0.0.0.0", "::", "") else f"http://{host}:{port}"
     print(f"Fake Stock Market listening on {host}:{port}, open {url}  (Ctrl+C to stop)", flush=True)
     print(f"Saving profiles in {profiles.dir.resolve()}", flush=True)
+    names = getattr(server.RequestHandlerClass.trader.prices.source, "names", None)
+    if names:
+        print(f"Price sources, in order: {', '.join(names)}", flush=True)
     if host not in ("127.0.0.1", "localhost") and not password:
         print("Warning: anyone who can reach this address can trade and delete profiles. "
               "Set PAPERTRADER_PASSWORD to require a password.", flush=True)
