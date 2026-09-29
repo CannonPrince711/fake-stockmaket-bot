@@ -170,6 +170,16 @@
            box-shadow: 0 12px 30px rgba(0,0,0,.25); max-width: calc(100% - 32px); z-index: 10; }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
   .toast.err { background: #e11d48; color: #fff; }
+  .live { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 12px; font-weight: 600;
+          color: var(--muted); padding: 2px 9px 2px 8px; border-radius: 999px; background: var(--card-2); border: 1px solid var(--line); }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 0 var(--up); animation: pulse 2s infinite; }
+  .live.off i { background: var(--muted); animation: none; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--up-soft); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  .flash-up { animation: flashUp 1.2s ease; }
+  .flash-down { animation: flashDown 1.2s ease; }
+  @keyframes flashUp { 0% { background: var(--up-soft); color: var(--up); } 100% { background: transparent; } }
+  @keyframes flashDown { 0% { background: var(--down-soft); color: var(--down); } 100% { background: transparent; } }
+  .price, .h-value, .big { border-radius: 8px; }
   .skeleton { color: transparent !important; background: linear-gradient(90deg, var(--card-2), var(--line), var(--card-2));
               background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: 8px; }
   @keyframes shimmer { to { background-position: -200% 0; } }
@@ -265,7 +275,7 @@
 
   <section class="card overview">
     <div class="overview-main">
-      <div class="eyebrow">Portfolio value</div>
+      <div class="eyebrow">Portfolio value <span class="live" id="live" title="Prices refresh every few seconds"><i></i><span id="live-text">Live</span></span></div>
       <div class="big skeleton" id="total">$100,000.00</div>
       <span class="chip" id="change">…</span>
       <div class="mini-stats">
@@ -403,6 +413,7 @@ async function refresh() {
   const invested = p.total - p.cash;
 
   $("total").textContent = money(p.total);
+  flash($("total"), flashClass("total:" + p.profile, p.total));
   $("total").classList.remove("skeleton");
   $("change").className = "chip " + tone(change);
   $("change").textContent = `${change >= 0 ? "▲" : "▼"} ${signed(change)} (${pctText(pct)}) all time`;
@@ -457,7 +468,7 @@ function renderHoldings(p) {
         <div class="h-sub">${qty(h.shares)} ${units(h.symbol, h.shares)} · avg ${price(h.avg_cost)}</div>
       </div>
       <div class="h-right">
-        <div class="h-value">${money(h.value)}</div>
+        <div class="h-value${flashClass("v:" + h.symbol, h.price)}">${money(h.value)}</div>
         <div class="h-pl ${tone(h.pl)}">${signed(h.pl)} (${pctText(plPct)})</div>
       </div>
       <div class="bar"><i style="width:${(h.value / max) * 100}%;background:${colorFor(h.symbol)}"></i></div>
@@ -495,6 +506,7 @@ async function lookUp(symbol) {
     const q = await api("/api/quote?symbol=" + encodeURIComponent(symbol));
     state.symbol = q.symbol;
     state.price = q.price;
+    lastSeen["q:" + q.symbol] = q.price;
     renderQuote();
     loadChart();
   } catch (e) {
@@ -615,9 +627,69 @@ function drawChart(points) {
 async function busy(fn) {
   const buttons = document.querySelectorAll("button");
   buttons.forEach((b) => (b.disabled = true));
+  state.busy = true;
   try { await fn(); } catch (e) { toast(e.message, false); }
-  finally { buttons.forEach((b) => (b.disabled = false)); }
+  finally { state.busy = false; buttons.forEach((b) => (b.disabled = false)); }
 }
+
+/* ---------- Live refresh ---------- */
+
+const REFRESH_MS = 5000;
+const lastSeen = {};
+let polling = false, lastUpdate = Date.now(), liveOk = true;
+
+// Returns " flash-up" / " flash-down" when a watched number moved since the last refresh.
+function flashClass(key, value) {
+  const before = lastSeen[key];
+  lastSeen[key] = value;
+  if (before === undefined || before === value) return "";
+  return value > before ? " flash-up" : " flash-down";
+}
+
+function flash(el, cls) {
+  if (!el || !cls) return;
+  el.classList.remove("flash-up", "flash-down");
+  void el.offsetWidth;  // restart the animation
+  el.classList.add(cls.trim());
+}
+
+function updateQuotePrice(p) {
+  const cls = flashClass("q:" + state.symbol, p);
+  state.price = p;
+  const el = document.querySelector(".price");
+  if (el) { el.textContent = price(p); flash(el, cls); }
+  renderTicket();
+}
+
+async function tick() {
+  if (document.hidden || polling || state.busy || $("dialog").open || !state.profile) return;
+  polling = true;
+  try {
+    const symbol = state.symbol;
+    const [, q] = await Promise.all([
+      refresh(),
+      symbol ? api("/api/quote?symbol=" + encodeURIComponent(symbol)) : null,
+    ]);
+    if (q && q.symbol === state.symbol) updateQuotePrice(q.price);
+    lastUpdate = Date.now();
+    liveOk = true;
+  } catch {
+    liveOk = false;
+  } finally {
+    polling = false;
+    renderLive();
+  }
+}
+
+function renderLive() {
+  const secs = Math.round((Date.now() - lastUpdate) / 1000);
+  $("live").classList.toggle("off", !liveOk || document.hidden);
+  $("live-text").textContent = !liveOk ? "Reconnecting…" : secs < 2 ? "Live" : `Live · ${secs}s ago`;
+}
+
+setInterval(tick, REFRESH_MS);
+setInterval(renderLive, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 
 /* ---------- Events ---------- */
 

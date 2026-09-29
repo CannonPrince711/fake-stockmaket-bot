@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .portfolio import Portfolio, TradeError
-from .prices import PriceError, YahooPrices
+from .prices import CachedPrices, PriceError, YahooPrices
 from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
 
 PAGE = Path(__file__).with_name("static") / "index.html"
@@ -21,9 +21,9 @@ PAGE = Path(__file__).with_name("static") / "index.html"
 class Trader:
     """All profiles plus a price source, safe to use from several requests at once."""
 
-    def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE):
+    def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE, price_ttl: float = 3.0):
         self.profiles = profiles
-        self.prices = prices or YahooPrices()
+        self.prices = CachedPrices(prices or YahooPrices(), ttl=price_ttl)
         self.lock = threading.Lock()
         self.start_profile = profiles.ensure(start_profile)
 
@@ -59,10 +59,10 @@ class Trader:
             data = {"profile": name, "cash": p.cash, "starting_cash": p.starting_cash,
                     "history": list(reversed(p.history))}
         holdings, total, stale = [], data["cash"], False
+        prices = self.prices.get_prices(positions)
         for symbol, (shares, avg_cost) in sorted(positions.items()):
-            try:
-                price = self.prices.get_price(symbol)
-            except PriceError:
+            price = prices[symbol]
+            if isinstance(price, PriceError):
                 price, stale = avg_cost, True  # fall back so totals still add up
             value = shares * price
             total += value
@@ -93,7 +93,7 @@ class Trader:
                 shares = float(shares)
             except (TypeError, ValueError):
                 raise TradeError(f"'{shares}' isn't a number of shares") from None
-            price = self.prices.get_price(symbol)
+            price = self.prices.fresh_price(symbol)
             do = portfolio.buy if side == "buy" else portfolio.sell
             trade = do(symbol, shares, price)
             self.profiles.save(name, portfolio)
@@ -201,8 +201,9 @@ def make_handler(trader: Trader, password: str | None = None):
 
 
 def make_server(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, prices=None,
-                start_profile: str = DEFAULT_PROFILE, password: str | None = None) -> ThreadingHTTPServer:
-    handler = make_handler(Trader(profiles, prices, start_profile), password)
+                start_profile: str = DEFAULT_PROFILE, password: str | None = None,
+                price_ttl: float = 3.0) -> ThreadingHTTPServer:
+    handler = make_handler(Trader(profiles, prices, start_profile, price_ttl), password)
     return ThreadingHTTPServer((host, port), handler)
 
 

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 # yfinance logs its own retries; our error message is enough.
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -52,3 +55,52 @@ class YahooPrices:
 
     def get_prices(self, symbols) -> dict[str, float]:
         return {s: self.get_price(s) for s in symbols}
+
+
+class CachedPrices:
+    """Wraps a price source and remembers each price for a few seconds.
+
+    The web page asks for prices every few seconds, possibly from several tabs; this keeps
+    those requests fast and stops us hammering Yahoo with identical lookups.
+    """
+
+    def __init__(self, source, ttl: float = 3.0, clock=time.monotonic):
+        self.source = source
+        self.ttl = ttl
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.cache: dict[str, tuple[float, float]] = {}  # symbol -> (fetched_at, price)
+
+    def get_price(self, symbol: str) -> float:
+        symbol = symbol.strip().upper()
+        with self.lock:
+            hit = self.cache.get(symbol)
+        if hit and self.clock() - hit[0] < self.ttl:
+            return hit[1]
+        return self.fresh_price(symbol)
+
+    def fresh_price(self, symbol: str) -> float:
+        """Always ask the source; used for trades so they fill at the latest price."""
+        symbol = symbol.strip().upper()
+        price = self.source.get_price(symbol)
+        with self.lock:
+            self.cache[symbol] = (self.clock(), price)
+        return price
+
+    def get_prices(self, symbols) -> dict[str, float | PriceError]:
+        """Look up several prices at once, in parallel. Failed lookups come back as the PriceError."""
+        symbols = list(symbols)
+
+        def one(symbol):
+            try:
+                return self.get_price(symbol)
+            except PriceError as exc:
+                return exc
+
+        if len(symbols) <= 1:
+            return {s: one(s) for s in symbols}
+        with ThreadPoolExecutor(max_workers=min(8, len(symbols))) as pool:
+            return dict(zip(symbols, pool.map(one, symbols)))
+
+    def get_history(self, symbol: str, period: str = "1mo") -> list[dict]:
+        return self.source.get_history(symbol, period)
