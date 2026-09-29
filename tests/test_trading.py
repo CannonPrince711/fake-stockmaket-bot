@@ -165,3 +165,21 @@ def test_cli_profile_commands(tmp_path):
     app.run(["delete", "Risky"])
     app.run(["profiles"])
     assert "* Main" in out.getvalue() and "Risky" not in app.profiles.names()
+
+
+def test_crypto_fractional_and_tiny_prices(tmp_path):
+    from papertrader.cli import money
+
+    app, out = make_app(tmp_path, **{"BTC-USD": 100_000.0, "DOGE-USD": 0.1234, "SHIB-USD": 0.00001234})
+    app.run(["buy", "btc-usd", "0.05"])
+    app.run(["buy", "DOGE-USD", "1000"])
+    app.run(["buy", "SHIB-USD", "1000000"])
+    assert app.portfolio.cash == 94_864.26
+    assert app.portfolio.history[-1]["price"] == 0.00001234
+    app.run(["sell", "BTC-USD", "0.02"])
+    assert abs(app.portfolio.positions["BTC-USD"].shares - 0.03) < 1e-9
+    app.run(["crypto"])
+    text = out.getvalue()
+    assert "@ $0.1234" in text and "Bitcoin" in text
+    assert money(0.00001234) == "$0.000012"
+    assert money(1234.5) == "$1,234.50"

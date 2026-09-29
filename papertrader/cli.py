@@ -14,8 +14,9 @@ from .profiles import DEFAULT_DIR, DEFAULT_PROFILE, LEGACY_FILE, Profiles, parse
 
 HELP = """Commands:
   quote SYMBOL [SYMBOL ...]   show the current real-world price
-  buy SYMBOL SHARES           buy shares at the current price
-  sell SYMBOL SHARES|all      sell shares at the current price
+  buy SYMBOL AMOUNT           buy shares (or coins) at the current price
+  sell SYMBOL AMOUNT|all      sell shares (or coins) at the current price
+  crypto                      list popular cryptocurrencies you can trade
   portfolio                   show cash, holdings and profit/loss
   history                     show every trade you've made
   reset [CASH]                start this profile over (default $100,000)
@@ -26,6 +27,9 @@ Profiles (separate portfolios, each with its own starting cash):
   switch NAME                 switch to another profile
   delete NAME                 delete a profile
   help                        show this list
+
+Stocks use their ticker (AAPL, SPY). Crypto uses COIN-USD (BTC-USD, ETH-USD),
+and you can buy fractions, e.g. buy BTC-USD 0.05
   quit                        leave"""
 
 
@@ -68,7 +72,13 @@ class App:
         if not rest:
             raise TradeError("Usage: quote SYMBOL [SYMBOL ...]")
         for symbol in rest:
-            self.say(f"{symbol.upper():<8} ${self.prices.get_price(symbol):,.2f}")
+            self.say(f"{symbol.upper():<10} {money(self.prices.get_price(symbol))}")
+
+    def cmd_crypto(self, rest):
+        self.say("Popular cryptocurrencies (use these tickers to quote, buy and sell):")
+        for symbol, name in POPULAR_CRYPTO.items():
+            self.say(f"  {symbol:<10} {name}")
+        self.say("Any coin Yahoo Finance lists as COIN-USD works too.")
 
     def cmd_buy(self, rest):
         symbol, shares = self._symbol_and_shares(rest, "buy")
@@ -76,7 +86,7 @@ class App:
         trade = self.portfolio.buy(symbol, float(shares), price)
         self.portfolio.save(self.path)
         self.say(
-            f"Bought {trade['shares']:g} {trade['symbol']} @ ${price:,.2f} "
+            f"Bought {trade['shares']:g} {trade['symbol']} @ {money(price)} "
             f"for ${trade['total']:,.2f}. Cash left: ${self.portfolio.cash:,.2f}"
         )
 
@@ -92,7 +102,7 @@ class App:
         trade = self.portfolio.sell(symbol, float(shares), price)
         self.portfolio.save(self.path)
         self.say(
-            f"Sold {trade['shares']:g} {trade['symbol']} @ ${price:,.2f} "
+            f"Sold {trade['shares']:g} {trade['symbol']} @ {money(price)} "
             f"for ${trade['total']:,.2f}. Cash now: ${self.portfolio.cash:,.2f}"
         )
 
@@ -102,13 +112,13 @@ class App:
         self.say(f"Cash: ${p.cash:,.2f}")
         if p.positions:
             self.say()
-            self.say(f"{'Symbol':<8}{'Shares':>10}{'Avg cost':>12}{'Price':>12}{'Value':>14}{'P/L':>14}")
+            self.say(f"{'Symbol':<10}{'Amount':>12}{'Avg cost':>14}{'Price':>14}{'Value':>14}{'P/L':>14}")
             for symbol, pos in sorted(p.positions.items()):
                 price = prices[symbol]
                 value = pos.shares * price
                 pl = value - pos.shares * pos.avg_cost
                 self.say(
-                    f"{symbol:<8}{pos.shares:>10g}{pos.avg_cost:>12,.2f}{price:>12,.2f}"
+                    f"{symbol:<10}{pos.shares:>12g}{money(pos.avg_cost):>14}{money(price):>14}"
                     f"{value:>14,.2f}{pl:>+14,.2f}"
                 )
             self.say()
@@ -121,7 +131,7 @@ class App:
         if not self.portfolio.history:
             self.say("No trades yet.")
         for t in self.portfolio.history:
-            self.say(f"{t['time']}  {t['side']:<4} {t['shares']:>8g} {t['symbol']:<6} @ ${t['price']:,.2f}  = ${t['total']:,.2f}")
+            self.say(f"{t['time']}  {t['side']:<4} {t['shares']:>10g} {t['symbol']:<9} @ {money(t['price'])}  = ${t['total']:,.2f}")
 
     def cmd_reset(self, rest):
         cash = parse_cash(rest[0] if rest else None)
@@ -166,7 +176,7 @@ class App:
     @staticmethod
     def _symbol_and_shares(rest, verb):
         if len(rest) != 2:
-            raise TradeError(f"Usage: {verb} SYMBOL SHARES")
+            raise TradeError(f"Usage: {verb} SYMBOL AMOUNT")
         symbol, shares = rest
         if shares.lower() == "all" and verb == "sell":
             return symbol, "all"
@@ -182,6 +192,19 @@ def default_data_dir() -> Path:
         if os.environ.get(var):
             return Path(os.environ[var])
     return DEFAULT_DIR
+
+
+POPULAR_CRYPTO = {
+    "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "SOL-USD": "Solana", "XRP-USD": "XRP",
+    "DOGE-USD": "Dogecoin", "ADA-USD": "Cardano", "LTC-USD": "Litecoin",
+}
+
+
+def money(amount: float) -> str:
+    """Dollars with cents, or more decimals for prices under $1 (like DOGE)."""
+    if abs(amount) >= 1 or amount == 0:
+        return f"${amount:,.2f}"
+    return f"${amount:,.6f}".rstrip("0")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,6 +1,6 @@
 # Fake Stock Market
 
-Trade real-world stocks with pretend money. Pick how much fake cash you start with
+Trade real-world stocks and crypto with pretend money. Pick how much fake cash you start with
 ($100,000 unless you say otherwise), buy and sell at live prices from Yahoo Finance,
 and keep as many separate **profiles** as you like, one per person or per strategy.
 Everything is saved in the `profiles/` folder so it's still there next time.
@@ -84,8 +84,9 @@ profile called `default`, and `--cash` only matters when a profile is first crea
 | Command | What it does |
 | --- | --- |
 | `quote SYMBOL [SYMBOL ...]` | Show the current price |
-| `buy SYMBOL SHARES` | Buy at the current price (fractional shares are fine) |
-| `sell SYMBOL SHARES` or `sell SYMBOL all` | Sell at the current price |
+| `buy SYMBOL AMOUNT` | Buy shares or coins at the current price (fractions are fine) |
+| `sell SYMBOL AMOUNT` or `sell SYMBOL all` | Sell at the current price |
+| `crypto` | List popular cryptocurrencies you can trade |
 | `portfolio` | Cash, holdings, and profit/loss |
 | `history` | Every trade you've made |
 | `reset [CASH]` | Start this profile over, optionally with a different amount of cash |
@@ -122,6 +123,21 @@ Settings the app reads from the environment:
 A `Procfile` is included too, so hosts like Render or Heroku can start it with the same command.
 Yahoo Finance sometimes rate-limits requests from cloud servers; if quotes start failing on the
 hosted site, wait a bit and try again.
+
+## Crypto
+
+Crypto trades just like stocks, using Yahoo's `COIN-USD` tickers: `BTC-USD` (Bitcoin),
+`ETH-USD` (Ethereum), `SOL-USD`, `XRP-USD`, `DOGE-USD`, `ADA-USD`, `LTC-USD` and any other coin
+Yahoo lists. You can buy fractions of a coin:
+
+```bash
+python -m papertrader buy BTC-USD 0.05
+python -m papertrader buy DOGE-USD 10000
+```
+
+In the browser, switch the quick picks to **Crypto** to see popular coins. Crypto prices update
+around the clock, including weekends. Note that a plain `BTC` is a stock ticker (a Bitcoin ETF),
+not Bitcoin itself, so use `BTC-USD` for the coin.
 
 ## Notes
 
