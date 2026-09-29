@@ -233,6 +233,21 @@
   .primary.danger { background: #e11d48; }
   .dlg-error { color: var(--down); font-size: 13.5px; font-weight: 600; margin-top: -6px; }
 
+  /* Log in / sign up */
+  .auth { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+  .auth-card { width: 400px; max-width: 100%; padding: 28px; display: grid; gap: 16px; }
+  .auth-card .brand { margin-bottom: 4px; }
+  .auth-card label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .auth-card input { color: var(--text); border: 1px solid var(--line); background: var(--card-2); border-radius: 12px;
+                     padding: 11px 13px; font-size: 16px; font-weight: 600; outline: 0; }
+  .auth-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .auth-card .primary { padding: 12px 18px; }
+  .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+  .auth-tabs button { padding: 8px; }
+  .auth-note { margin: 0; font-size: 13px; color: var(--muted); }
+  .menu-user { padding: 8px 10px 2px; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-user b { color: var(--text); }
+
   @media (max-width: 900px) {
     .overview, .grid { grid-template-columns: 1fr; }
     .overview-side { border-left: 0; border-top: 1px solid var(--line); }
@@ -251,7 +266,33 @@
 </style>
 </head>
 <body>
-<main>
+<section class="auth" id="auth" hidden>
+  <form class="card auth-card" id="auth-form" autocomplete="on">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+      </div>
+      <div>
+        <h1>Fake Stock Market</h1>
+        <p>Pretend money, real prices</p>
+      </div>
+    </div>
+    <div class="ranges auth-tabs" id="auth-tabs">
+      <button type="button" data-mode="login" class="active">Log in</button>
+      <button type="button" data-mode="signup">Sign up</button>
+    </div>
+    <label>Username
+      <input id="auth-user" name="username" autocomplete="username" maxlength="30" required autocapitalize="off" spellcheck="false">
+    </label>
+    <label>Password
+      <input id="auth-pass" name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <p class="auth-note" id="auth-note" hidden>Pick a username (3 to 30 letters or numbers) and a password of at least 8 characters. Your profiles are private to your account.</p>
+    <div class="dlg-error" id="auth-error" hidden></div>
+    <button type="submit" class="primary" id="auth-ok">Log in</button>
+  </form>
+</section>
+<main id="app" hidden>
   <header class="topbar">
     <div class="brand">
       <div class="logo" aria-hidden="true">
@@ -269,12 +310,17 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="menu" id="menu" role="menu">
+        <div class="menu-user" id="menu-user" hidden></div>
         <div class="menu-label">Profiles</div>
         <div class="menu-list" id="menu-list"></div>
         <hr>
         <button class="menu-item" data-action="new"><span class="ico">＋</span><span class="grow t">New profile</span></button>
         <button class="menu-item" data-action="reset"><span class="ico">↺</span><span class="grow t">Reset this profile</span></button>
         <button class="menu-item danger" data-action="delete"><span class="ico">✕</span><span class="grow t">Delete this profile</span></button>
+        <div id="account-items" hidden>
+          <hr>
+          <button class="menu-item" data-action="logout"><span class="ico">⇥</span><span class="grow t">Log out</span></button>
+        </div>
       </div>
     </div>
   </header>
@@ -383,9 +429,10 @@ const price = (n) => Math.abs(n) >= 1 || n === 0 ? money(n)
 
 const state = { market: "stocks", portfolio: null, symbol: null, price: null, side: "buy", period: "1mo", colors: {}, profile: null, profiles: [] };
 const PRESETS = [["$10K", 10000], ["$50K", 50000], ["$100K", 100000], ["$1M", 1000000]];
+const storeKey = () => "papertrader.profile" + (state.user ? "." + state.user.toLowerCase() : "");
 const store = {
-  get() { try { return localStorage.getItem("papertrader.profile"); } catch { return null; } },
-  set(v) { try { localStorage.setItem("papertrader.profile", v); } catch {} },
+  get() { try { return localStorage.getItem(storeKey()); } catch { return null; } },
+  set(v) { try { localStorage.setItem(storeKey(), v); } catch {} },
 };
 
 async function api(path, body) {
@@ -393,6 +440,7 @@ async function api(path, body) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const data = await res.json();
+  if (res.status === 401 && data.login) showAuth();  // logged out, e.g. the session expired
   if (!res.ok) throw new Error(data.error || "Something went wrong");
   return data;
 }
@@ -742,7 +790,6 @@ function renderSources(info) {
   $("src-pick").hidden = false;
 }
 
-api("/api/sources").then(renderSources).catch(() => {});  // hidden if the server can't switch
 
 $("source-select").addEventListener("change", (e) => {
   const choice = e.target.value;
@@ -761,7 +808,7 @@ $("source-select").addEventListener("change", (e) => {
   });
 });
 
-api("/api/catalog").then((c) => {
+const loadCatalog = () => api("/api/catalog").then((c) => {
   Object.assign(CATALOG.stocks, c.stocks);
   Object.assign(CATALOG.crypto, c.crypto);
   $("catalog").innerHTML = [...Object.entries(c.stocks), ...Object.entries(c.crypto)]
@@ -881,6 +928,8 @@ $("menu").addEventListener("click", (e) => {
   toggleMenu(false);
   if (item.dataset.profile) {
     if (item.dataset.profile !== state.profile) busy(() => switchProfile(item.dataset.profile).then(() => toast(`Switched to ${item.dataset.profile}`)));
+  } else if (item.dataset.action === "logout") {
+    logOut();
   } else {
     openDialog(item.dataset.action);
   }
@@ -959,7 +1008,80 @@ $("dlg-form").addEventListener("submit", async (e) => {
   }
 });
 
-loadProfiles().then(() => { store.set(state.profile); return refresh(); }).catch((e) => toast(e.message, false));
+/* ---------- Accounts ---------- */
+
+let authMode = "login";
+function setAuthMode(mode) {
+  authMode = mode;
+  document.querySelectorAll("#auth-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  $("auth-ok").textContent = mode === "signup" ? "Create account" : "Log in";
+  $("auth-pass").autocomplete = mode === "signup" ? "new-password" : "current-password";
+  $("auth-note").hidden = mode !== "signup";
+  $("auth-error").hidden = true;
+}
+
+function showAuth() {
+  state.profile = null;
+  state.user = null;
+  $("dialog").open && $("dialog").close();
+  $("app").hidden = true;
+  $("auth").hidden = false;
+  $("auth-tabs").hidden = !state.signups;
+  if (!state.signups) setAuthMode("login");
+  $("auth-pass").value = "";
+  $("auth-user").focus();
+}
+
+$("auth-tabs").addEventListener("click", (e) => { if (e.target.dataset.mode) setAuthMode(e.target.dataset.mode); });
+$("auth-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("auth-ok").disabled = true;
+  try {
+    const { user } = await api("/api/" + authMode, { username: $("auth-user").value, password: $("auth-pass").value });
+    state.user = user;
+    $("auth-pass").value = "";
+    $("auth").hidden = true;
+    await start();
+    toast(authMode === "signup" ? `Welcome, ${user}! You start with ${money(state.portfolio.cash)}.` : `Welcome back, ${user}`);
+  } catch (err) {
+    $("auth-error").textContent = err.message;
+    $("auth-error").hidden = false;
+  } finally {
+    $("auth-ok").disabled = false;
+  }
+});
+
+async function logOut() {
+  await api("/api/logout", {}).catch(() => {});
+  state.symbol = null;
+  state.colors = {};
+  state.portfolio = null;
+  $("quote").innerHTML = '<div class="quote-empty">Pick a stock above to see its price and chart.</div>';
+  setAuthMode("login");
+  showAuth();
+}
+
+async function start() {
+  $("app").hidden = false;
+  $("menu-user").hidden = $("account-items").hidden = !state.user;
+  if (state.user) $("menu-user").innerHTML = `Signed in as <b>${esc(state.user)}</b>`;
+  state.profile = null;
+  api("/api/sources").then(renderSources).catch(() => {});  // hidden if the server can't switch
+  if (!Object.keys(CATALOG.stocks).length) loadCatalog();
+  await loadProfiles();
+  store.set(state.profile);
+  await refresh();
+}
+
+api("/api/me").then((me) => {
+  state.user = me.user;
+  state.signups = me.signups;
+  if (me.accounts && !me.user) {
+    setAuthMode(me.first || (me.signups && location.hash === "#signup") ? "signup" : "login");
+    return showAuth();
+  }
+  return start();
+}).catch((e) => { $("app").hidden = false; toast(e.message, false); });
 
 </script>
 </body>

@@ -1,6 +1,7 @@
 {
-  "PAPERTRADER_PASSWORD": "change-me-to-a-strong-password",
   "PAPERTRADER_DATA_DIR": "/data",
+  "PAPERTRADER_SIGNUPS": "on",
+  "PAPERTRADER_PASSWORD": "optional-shared-site-password-or-delete-this-line",
   "PAPERTRADER_PRICE_SOURCES": "yahoo,finnhub,coingecko,stooq",
   "FINNHUB_API_KEY": "paste-your-free-finnhub-key-or-delete-this-line",
   "COINGECKO_API_KEY": "paste-your-free-coingecko-demo-key-or-delete-this-line"

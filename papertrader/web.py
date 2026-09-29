@@ -7,12 +7,14 @@ import hmac
 import json
 import threading
 import webbrowser
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import catalog
 from .portfolio import Portfolio, TradeError
+from .accounts import SESSION_DAYS, Accounts, LoginLimiter
 from .prices import CachedPrices, PriceError
 from .sources import build_sources, load_preference, save_preference
 from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
@@ -20,20 +22,33 @@ from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
 PAGE = Path(__file__).with_name("static") / "index.html"
 
 
-class Trader:
-    """All profiles plus a price source, safe to use from several requests at once."""
+class Site:
+    """Shared price feed plus one Trader per account (or a single Trader when accounts are off)."""
 
-    def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE, price_ttl: float = 0.9):
-        self.profiles = profiles
+    def __init__(self, profiles: Profiles, prices=None, start_profile: str = DEFAULT_PROFILE,
+                 price_ttl: float = 0.9, accounts: Accounts | None = None):
+        self.data_dir = profiles.dir
+        self.accounts = accounts
         self.prices = CachedPrices(prices or build_sources(), ttl=price_ttl)
-        self.lock = threading.Lock()
-        self.start_profile = profiles.ensure(start_profile)
+        self.limiter = LoginLimiter()
         chooser = self.prices.source
         if hasattr(chooser, "set_preferred"):
             try:
                 chooser.set_preferred(load_preference(profiles.dir))
             except PriceError:
                 pass  # e.g. Finnhub was chosen but its key has since been removed
+        self.base = None if accounts else Trader(profiles, self.prices, start_profile)
+        self.traders: dict[str, Trader] = {}
+        self.lock = threading.Lock()
+
+    def trader_for(self, username: str | None) -> "Trader":
+        if self.accounts is None:
+            return self.base
+        key = username.lower()
+        with self.lock:
+            if key not in self.traders:
+                self.traders[key] = Trader(self.accounts.profiles(username), self.prices)
+            return self.traders[key]
 
     def price_sources(self) -> dict:
         chooser = self.prices.source
@@ -46,9 +61,19 @@ class Trader:
         if not hasattr(chooser, "set_preferred"):
             raise PriceError("This server's price source can't be switched")
         chooser.set_preferred(key)
-        save_preference(self.profiles.dir, chooser.preferred)
+        save_preference(self.data_dir, chooser.preferred)
         self.prices.clear()
         return chooser.describe()
+
+
+class Trader:
+    """One set of profiles, safe to use from several requests at once."""
+
+    def __init__(self, profiles: Profiles, prices: CachedPrices, start_profile: str = DEFAULT_PROFILE):
+        self.profiles = profiles
+        self.prices = prices
+        self.lock = threading.Lock()
+        self.start_profile = profiles.ensure(start_profile)
 
     def list_profiles(self) -> dict:
         with self.lock:
@@ -131,13 +156,17 @@ class Trader:
         return {"ok": True}
 
 
-def make_handler(trader: Trader, password: str | None = None):
+COOKIE = "papertrader_session"
+OPEN_API = ("/api/me", "/api/signup", "/api/login", "/api/logout", "/api/catalog")
+
+
+def make_handler(site: Site, password: str | None = None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # keep the terminal quiet
             pass
 
         def authorized(self) -> bool:
-            """With a password set, ask the browser for it (any username works)."""
+            """With a site password set, ask the browser for it (any username works)."""
             if not password:
                 return True
             header = self.headers.get("Authorization", "")
@@ -157,15 +186,33 @@ def make_handler(trader: Trader, password: str | None = None):
             self.wfile.write(body)
             return False
 
-        def send(self, status: int, body: bytes, content_type: str) -> None:
+        def current_user(self) -> str | None:
+            if site.accounts is None:
+                return None
+            jar = SimpleCookie()
+            try:
+                jar.load(self.headers.get("Cookie", ""))
+            except CookieError:
+                return None
+            morsel = jar.get(COOKIE)
+            return site.accounts.user_for_token(morsel.value if morsel else None)
+
+        def cookie(self, token: str, max_age: int) -> str:
+            secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""
+            return f"{COOKIE}={token}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Lax{secure}"
+
+        def send(self, status: int, body: bytes, content_type: str, headers: dict | None = None) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
-        def send_json(self, data, status: int = 200) -> None:
-            self.send(status, json.dumps(data).encode(), "application/json")
+        def send_json(self, data, status: int = 200, headers: dict | None = None) -> None:
+            self.send(status, json.dumps(data).encode(), "application/json", headers)
 
         def handle_api(self, action):
             try:
@@ -173,28 +220,72 @@ def make_handler(trader: Trader, password: str | None = None):
             except (TradeError, PriceError, ValueError) as exc:
                 self.send_json({"error": str(exc)}, 400)
 
+        def me(self) -> dict:
+            if site.accounts is None:
+                return {"accounts": False, "user": None}
+            return {"accounts": True, "user": self.current_user(), "signups": site.accounts.signups_open(),
+                    "first": site.accounts.count() == 0}
+
+        def log_in(self, body: dict, signup: bool) -> None:
+            if site.accounts is None:
+                return self.send_json({"error": "Accounts are turned off on this site"}, 400)
+            username, pw = str(body.get("username", "")), str(body.get("password", ""))
+            # Counted per username: behind a host's proxy every visitor can share one address.
+            who = username.strip().lower()
+            if not signup and site.limiter.blocked(who):
+                return self.send_json({"error": "Too many wrong passwords. Wait a few minutes and try again."}, 429)
+            try:
+                if signup:
+                    name = site.accounts.create(username, pw)
+                else:
+                    name = site.accounts.check_password(username, pw)
+            except TradeError as exc:
+                if not signup:
+                    site.limiter.failed(who)
+                return self.send_json({"error": str(exc)}, 400)
+            site.limiter.succeeded(who)
+            token = site.accounts.make_token(name)
+            self.send_json({"user": name}, headers={"Set-Cookie": self.cookie(token, SESSION_DAYS * 86400)})
+
+        def gate(self, path: str):
+            """The Trader for this request, or None after answering 401 when a login is needed."""
+            if site.accounts is None:
+                return site.base
+            if path in OPEN_API or not path.startswith("/api/"):
+                return True
+            user = self.current_user()
+            if user is None:
+                self.send_json({"error": "Please log in", "login": True}, 401)
+                return None
+            return site.trader_for(user)
+
         def do_GET(self):
             url = urlparse(self.path)
             if url.path == "/healthz":  # for hosting health checks; no password needed
                 return self.send(200, b"ok", "text/plain")
             if not self.authorized():
                 return
+            trader = self.gate(url.path)
+            if trader is None:
+                return
+            query = parse_qs(url.query)
             if url.path == "/":
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif url.path == "/api/me":
+                self.send_json(self.me())
             elif url.path == "/api/profiles":
                 self.handle_api(trader.list_profiles)
             elif url.path == "/api/sources":
-                self.handle_api(trader.price_sources)
+                self.handle_api(site.price_sources)
             elif url.path == "/api/catalog":
                 self.send_json({"stocks": catalog.STOCKS, "crypto": catalog.CRYPTO})
             elif url.path == "/api/portfolio":
-                profile = parse_qs(url.query).get("profile", [trader.start_profile])[0]
+                profile = query.get("profile", [trader.start_profile])[0]
                 self.handle_api(lambda: trader.summary(profile))
             elif url.path == "/api/quote":
-                symbol = parse_qs(url.query).get("symbol", [""])[0]
+                symbol = query.get("symbol", [""])[0]
                 self.handle_api(lambda: trader.quote(symbol))
             elif url.path == "/api/history":
-                query = parse_qs(url.query)
                 symbol = query.get("symbol", [""])[0]
                 period = query.get("period", ["1mo"])[0]
                 self.handle_api(lambda: trader.history(symbol, period))
@@ -212,6 +303,13 @@ def make_handler(trader: Trader, password: str | None = None):
                 return self.send_json({"error": "Bad request"}, 400)
             if not isinstance(body, dict):
                 return self.send_json({"error": "Bad request"}, 400)
+            if url.path in ("/api/signup", "/api/login"):
+                return self.log_in(body, signup=url.path == "/api/signup")
+            if url.path == "/api/logout":
+                return self.send_json({"ok": True}, headers={"Set-Cookie": self.cookie("", 0)})
+            trader = self.gate(url.path)
+            if trader is None:
+                return
             profile = str(body.get("profile") or trader.start_profile)
             if url.path in ("/api/buy", "/api/sell"):
                 side = url.path.rsplit("/", 1)[1]
@@ -221,36 +319,41 @@ def make_handler(trader: Trader, password: str | None = None):
             elif url.path == "/api/profiles":
                 self.handle_api(lambda: trader.create_profile(str(body.get("name", "")), body.get("cash")))
             elif url.path == "/api/sources":
-                self.handle_api(lambda: trader.set_price_source(str(body.get("source", ""))))
+                self.handle_api(lambda: site.set_price_source(str(body.get("source", ""))))
             elif url.path == "/api/profiles/delete":
                 self.handle_api(lambda: trader.delete_profile(str(body.get("name", ""))))
             else:
                 self.send_json({"error": "Not found"}, 404)
 
-    Handler.trader = trader
+    Handler.site = site
     return Handler
 
 
 def make_server(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, prices=None,
                 start_profile: str = DEFAULT_PROFILE, password: str | None = None,
-                price_ttl: float = 0.9) -> ThreadingHTTPServer:
-    handler = make_handler(Trader(profiles, prices, start_profile, price_ttl), password)
+                price_ttl: float = 0.9, accounts: Accounts | None = None) -> ThreadingHTTPServer:
+    handler = make_handler(Site(profiles, prices, start_profile, price_ttl, accounts), password)
     return ThreadingHTTPServer((host, port), handler)
 
 
 def serve(profiles: Profiles, host: str = "127.0.0.1", port: int = 8000, open_browser: bool = True,
-          start_profile: str = DEFAULT_PROFILE, password: str | None = None) -> None:
-    server = make_server(profiles, host=host, port=port, start_profile=start_profile, password=password)
+          start_profile: str = DEFAULT_PROFILE, password: str | None = None,
+          accounts: Accounts | None = None) -> None:
+    server = make_server(profiles, host=host, port=port, start_profile=start_profile, password=password,
+                         accounts=accounts)
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}" if host in ("0.0.0.0", "::", "") else f"http://{host}:{port}"
     print(f"Fake Stock Market listening on {host}:{port}, open {url}  (Ctrl+C to stop)", flush=True)
     print(f"Saving profiles in {profiles.dir.resolve()}", flush=True)
-    names = getattr(server.RequestHandlerClass.trader.prices.source, "names", None)
+    if accounts:
+        state = "open" if accounts.allow_signups else "closed (set PAPERTRADER_SIGNUPS=on to reopen)"
+        print(f"Accounts are on: {accounts.count()} so far, sign-ups {state}", flush=True)
+    names = getattr(server.RequestHandlerClass.site.prices.source, "names", None)
     if names:
         print(f"Price sources, in order: {', '.join(names)}", flush=True)
-    if host not in ("127.0.0.1", "localhost") and not password:
+    if host not in ("127.0.0.1", "localhost") and not password and not accounts:
         print("Warning: anyone who can reach this address can trade and delete profiles. "
-              "Set PAPERTRADER_PASSWORD to require a password.", flush=True)
+              "Turn accounts on or set PAPERTRADER_PASSWORD to require a password.", flush=True)
     if open_browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()
     try:

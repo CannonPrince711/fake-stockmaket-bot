@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from . import catalog
+from .accounts import Accounts
 from .portfolio import Portfolio, TradeError
 from .prices import PriceError
 from .sources import build_sources, load_preference, save_preference
@@ -226,6 +227,13 @@ def default_data_dir() -> Path:
     return DEFAULT_DIR
 
 
+def env_flag(name: str, default: bool) -> bool:
+    """Read an on/off setting such as PAPERTRADER_ACCOUNTS=off."""
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    return value not in ("0", "off", "false", "no")
+
 
 def money(amount: float) -> str:
     """Dollars with cents, or more decimals for prices under $1 (like DOGE)."""
@@ -245,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cash", help="starting cash for a new profile, e.g. 50000 or 50k (default: 100k)")
     parser.add_argument("--data-dir", type=Path, default=default_data_dir(),
                         help="folder where profiles are saved (default: profiles, or $PAPERTRADER_DATA_DIR)")
+    parser.add_argument("--account", help="use the profiles of this web account (terminal only)")
     parser.add_argument("--web", action="store_true", help="open the browser interface instead of the terminal")
     parser.add_argument("--host", default=os.environ.get("HOST") or ("0.0.0.0" if "PORT" in os.environ else "127.0.0.1"),
                         help="address for --web to listen on (default: 127.0.0.1, or 0.0.0.0 when $PORT is set)")
@@ -258,14 +267,27 @@ def main(argv: list[str] | None = None) -> int:
     if opts.web:
         from .web import serve
 
-        try:
-            profiles.ensure(opts.profile, opts.cash)
-        except TradeError as exc:
-            parser.error(str(exc))
+        accounts = None
+        if env_flag("PAPERTRADER_ACCOUNTS", True):
+            accounts = Accounts(opts.data_dir, allow_signups=env_flag("PAPERTRADER_SIGNUPS", True))
+            profiles.ensure_legacy()
+        else:
+            try:
+                profiles.ensure(opts.profile, opts.cash)
+            except TradeError as exc:
+                parser.error(str(exc))
         local = opts.host in ("127.0.0.1", "localhost")
         serve(profiles, host=opts.host, port=opts.port, open_browser=local and not opts.no_browser,
-              start_profile=opts.profile, password=os.environ.get("PAPERTRADER_PASSWORD") or None)
+              start_profile=opts.profile, password=os.environ.get("PAPERTRADER_PASSWORD") or None,
+              accounts=accounts)
         return 0
+
+    if opts.account:
+        accounts = Accounts(opts.data_dir)
+        name = accounts.name_of(opts.account)
+        if name is None:
+            parser.error(f"There's no account called '{opts.account}'")
+        profiles = accounts.profiles(name)
 
     try:
         app = App(profiles, opts.profile, opts.cash)
