@@ -77,10 +77,13 @@ class Profiles:
     def delete(self, name: str) -> None:
         self.path(self.find(name)).unlink()
 
-    def ensure(self, name: str = DEFAULT_PROFILE, cash=None) -> str:
-        """Make sure a profile exists, creating it if needed. Returns its stored name."""
+    def ensure_legacy(self) -> None:
         if self.legacy_file:
             self.import_legacy(self.legacy_file)
+
+    def ensure(self, name: str = DEFAULT_PROFILE, cash=None) -> str:
+        """Make sure a profile exists, creating it if needed. Returns its stored name."""
+        self.ensure_legacy()
         try:
             return self.find(name)
         except TradeError:

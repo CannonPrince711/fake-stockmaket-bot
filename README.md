@@ -34,7 +34,25 @@ Trades always fill at a freshly fetched price.
 Click the profile button in the top right to switch profiles, create a new one with its own
 starting cash, reset the current one with a new amount, or delete it.
 
-The browser and the terminal share the same profiles, so you can switch between them.
+## Accounts
+
+The browser version asks you to **sign up** with a username and password the first time, then
+**log in** after that. Each account has its own private profiles, so several people can share one
+hosted site without seeing or touching each other's portfolios. You stay logged in for 30 days
+on that browser; **Log out** is at the bottom of the profile menu.
+
+- The first account created also keeps any profiles that were saved before accounts existed.
+- Passwords are stored only as salted hashes (PBKDF2) in `accounts/users.json` inside the data
+  folder. Too many wrong passwords for one username locks that login for a few minutes.
+- Once everyone who should have an account has one, set `PAPERTRADER_SIGNUPS=off` to stop new
+  sign-ups. The very first account can always be created.
+- Price source choice ("Prices from") is shared by the whole site, not per account.
+- Playing alone on your own computer and don't want to log in? Start it with
+  `PAPERTRADER_ACCOUNTS=off python -m papertrader --web` to use the old shared profiles.
+
+The terminal doesn't need a login. Use `--account NAME` to play an account's profiles there, e.g.
+`python -m papertrader --account Alex`. Without it, the terminal uses the shared profiles, which
+are the same ones the browser uses when accounts are off.
 
 ## Play in the terminal
 
@@ -114,9 +132,10 @@ The repo is ready to deploy on [Railway](https://railway.com) as is:
 3. **Add a volume so profiles survive redeploys.** Add a volume to the service (right-click it on the
    project canvas, or press ⌘K / Ctrl+K and search for "volume") and mount it at `/data`. The app finds Railway volumes on its own
    and saves profiles there. Without a volume, every redeploy starts everyone from scratch.
-4. **Set a password.** Under **Variables**, add `PAPERTRADER_PASSWORD`. Your browser will ask
-   for it when you open the site (any username works). Without one, anyone with the link can
-   trade and delete your profiles.
+4. **Sign up.** Open the site and create your account. Everyone who has the link can make their
+   own account with private profiles. To keep strangers out, either set
+   `PAPERTRADER_SIGNUPS=off` once your friends have signed up, or set `PAPERTRADER_PASSWORD` so
+   the browser asks for a shared site password before anything else (any username works there).
 
 **Quick setup:** open [`railway.variables.example.json`](railway.variables.example.json), fill in
 your values, and delete the lines you don't need (like the API keys if you don't have them). In
@@ -128,7 +147,9 @@ Settings the app reads from the environment:
 | Variable | What it does |
 | --- | --- |
 | `PORT` | Port to listen on. Railway sets this; when it's set the app listens on all addresses and doesn't try to open a browser. |
-| `PAPERTRADER_PASSWORD` | Require this password to use the site. |
+| `PAPERTRADER_PASSWORD` | Optional shared password the browser asks for before the site even loads. |
+| `PAPERTRADER_SIGNUPS` | Set to `off` to stop new accounts being created (the first one is always allowed). |
+| `PAPERTRADER_ACCOUNTS` | Set to `off` to turn accounts off and share one set of profiles. |
 | `PAPERTRADER_DATA_DIR` | Folder to save profiles in. Defaults to the Railway volume if one is attached, otherwise `profiles/`. |
 | `FINNHUB_API_KEY` | Turns on Finnhub for real-time US stock prices (free key from finnhub.io). |
 | `COINGECKO_API_KEY` | Optional free CoinGecko demo key for higher crypto limits. |
