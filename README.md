@@ -118,6 +118,11 @@ The repo is ready to deploy on [Railway](https://railway.com) as is:
    for it when you open the site (any username works). Without one, anyone with the link can
    trade and delete your profiles.
 
+**Quick setup:** open [`railway.variables.example.json`](railway.variables.example.json), fill in
+your values, and delete the lines you don't need (like the API keys if you don't have them). In
+Railway, go to your service's **Variables** tab, click **Raw Editor**, switch it to **JSON**, paste
+the file, and click **Update Variables**. Don't commit a copy with real keys or passwords.
+
 Settings the app reads from the environment:
 
 | Variable | What it does |
@@ -125,6 +130,9 @@ Settings the app reads from the environment:
 | `PORT` | Port to listen on. Railway sets this; when it's set the app listens on all addresses and doesn't try to open a browser. |
 | `PAPERTRADER_PASSWORD` | Require this password to use the site. |
 | `PAPERTRADER_DATA_DIR` | Folder to save profiles in. Defaults to the Railway volume if one is attached, otherwise `profiles/`. |
+| `FINNHUB_API_KEY` | Turns on Finnhub for real-time US stock prices (free key from finnhub.io). |
+| `COINGECKO_API_KEY` | Optional free CoinGecko demo key for higher crypto limits. |
+| `PAPERTRADER_PRICE_SOURCES` | Default order of price services (see [Price sources](#price-sources)). |
 
 A `Procfile` is included too, so hosts like Render or Heroku can start it with the same command.
 Yahoo Finance sometimes rate-limits requests from cloud servers; if quotes start failing on the
