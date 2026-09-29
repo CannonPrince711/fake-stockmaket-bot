@@ -125,3 +125,66 @@ def test_build_sources_from_settings():
 def test_every_catalog_coin_has_a_coingecko_id():
     missing = [s for s in catalog.CRYPTO if s.removesuffix("-USD") not in CoinGeckoPrices.IDS]
     assert not missing
+
+
+def test_choose_preferred_source_keeps_backups(tmp_path):
+    from papertrader.sources import load_preference, save_preference
+
+    yahoo = Source("Yahoo Finance", {"AAPL": 1.0, "BTC-USD": 9.0}); yahoo.key = "yahoo"
+    stooq = Source("Stooq", {"AAPL": 2.0}); stooq.key = "stooq"
+    fb = FallbackPrices([yahoo, stooq])
+    fb.set_preferred("stooq")
+    assert fb.get_price("AAPL") == 2.0
+    assert fb.get_price("BTC-USD") == 9.0  # Stooq has no crypto, so Yahoo still answers
+    with pytest.raises(PriceError):
+        fb.set_preferred("finnhub")  # not turned on
+    with pytest.raises(PriceError):
+        fb.set_preferred("bloomberg")
+    fb.set_preferred("auto")
+    assert fb.get_price("AAPL") == 1.0
+    assert [s["id"] for s in fb.describe()["sources"] if s["enabled"]] == ["yahoo", "stooq"]
+
+    save_preference(tmp_path, "stooq")
+    assert load_preference(tmp_path) == "stooq"
+    save_preference(tmp_path, "auto")
+    assert load_preference(tmp_path) is None
+
+
+def test_switch_source_over_web_and_cli(tmp_path):
+    import io
+    import threading
+    import urllib.request
+
+    from papertrader.cli import App
+    from papertrader.profiles import Profiles
+    from papertrader.web import make_server
+
+    def sources():
+        y = Source("Yahoo Finance", {"AAPL": 1.0}); y.key = "yahoo"
+        s = Source("Stooq", {"AAPL": 2.0}); s.key = "stooq"
+        return FallbackPrices([y, s])
+
+    srv = make_server(Profiles(tmp_path), port=0, prices=sources(), price_ttl=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def post(path, body):
+        req = urllib.request.Request(base + path, json.dumps(body).encode(), {"Content-Type": "application/json"})
+        with urllib.request.urlopen(req) as res:
+            return json.loads(res.read())
+
+    try:
+        assert post("/api/sources", {"source": "stooq"})["preferred"] == "stooq"
+        with urllib.request.urlopen(base + "/api/quote?symbol=AAPL") as res:
+            quote = json.loads(res.read())
+        assert quote["price"] == 2.0 and quote["source"] == "Stooq"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+    # The choice is saved, so the terminal app starts with it too.
+    out = io.StringIO()
+    app = App(Profiles(tmp_path), prices=sources(), out=out)
+    assert app.prices.preferred == "stooq"
+    app.run(["source", "auto"])
+    assert app.prices.preferred is None and "* auto" in out.getvalue()

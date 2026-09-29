@@ -17,6 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from .prices import HISTORY_INTERVALS, PriceError, SourceDown, YahooPrices
 
@@ -47,6 +48,7 @@ PERIOD_DAYS = {"5d": 5, "1mo": 30, "6mo": 182, "1y": 365}
 
 
 class CoinGeckoPrices:
+    key = "coingecko"
     name = "CoinGecko"
     BASE = "https://api.coingecko.com/api/v3"
 
@@ -101,6 +103,7 @@ class CoinGeckoPrices:
 
 
 class FinnhubPrices:
+    key = "finnhub"
     name = "Finnhub"
     BASE = "https://finnhub.io/api/v1"
 
@@ -126,6 +129,7 @@ class FinnhubPrices:
 
 
 class StooqPrices:
+    key = "stooq"
     name = "Stooq"
     BASE = "https://stooq.com/q"
 
@@ -185,6 +189,29 @@ class FallbackPrices:
         self.down_until: dict[str, float] = {}
         self.last_source: dict[str, str] = {}
         self.lock = threading.Lock()
+        self.preferred: str | None = None  # a source key to try first; None means the normal order
+
+    def set_preferred(self, key: str | None) -> None:
+        key = (key or "").strip().lower() or None
+        if key in (None, "auto"):
+            self.preferred = None
+            return
+        if key not in SOURCE_INFO:
+            raise PriceError(f"Unknown price source '{key}'. Choose from: auto, {', '.join(SOURCE_INFO)}")
+        if key not in [getattr(s, "key", None) for s in self.sources]:
+            hint = " Set FINNHUB_API_KEY to turn it on." if key == "finnhub" else ""
+            raise PriceError(f"{SOURCE_INFO[key][0]} isn't turned on.{hint}")
+        self.preferred = key
+        with self.lock:
+            self.down_until.pop(SOURCE_INFO[key][0], None)  # give it a fresh chance
+
+    def describe(self) -> dict:
+        enabled = {getattr(s, "key", None) for s in self.sources}
+        return {
+            "preferred": self.preferred or "auto",
+            "sources": [{"id": key, "name": name, "covers": covers, "enabled": key in enabled}
+                        for key, (name, covers) in SOURCE_INFO.items()],
+        }
 
     @property
     def names(self) -> list[str]:
@@ -192,6 +219,8 @@ class FallbackPrices:
 
     def _candidates(self, symbol: str):
         usable = [s for s in self.sources if s.supports(symbol)]
+        # The chosen source goes first; the rest stay as backups (e.g. for crypto when Stooq is chosen).
+        usable.sort(key=lambda s: getattr(s, "key", None) != self.preferred)
         now = self.clock()
         up = [s for s in usable if self.down_until.get(s.name, 0) <= now]
         return up or usable  # if everything is cooling down, try anyway
@@ -234,7 +263,30 @@ class FallbackPrices:
         return {s: self.get_price(s) for s in symbols}
 
 
-SOURCE_NAMES = ("yahoo", "finnhub", "coingecko", "stooq")
+SOURCE_INFO = {
+    "yahoo": ("Yahoo Finance", "Stocks, ETFs and crypto, with charts"),
+    "finnhub": ("Finnhub", "US stocks, real-time (needs FINNHUB_API_KEY)"),
+    "coingecko": ("CoinGecko", "Crypto only, with charts"),
+    "stooq": ("Stooq", "US stocks, may be delayed, daily charts"),
+}
+SOURCE_NAMES = tuple(SOURCE_INFO)
+PREFERENCE_FILE = "price-source.setting"  # not .json, so it's never mistaken for a profile
+
+
+def load_preference(directory) -> str | None:
+    try:
+        return (Path(directory) / PREFERENCE_FILE).read_text().strip() or None
+    except OSError:
+        return None
+
+
+def save_preference(directory, key: str | None) -> None:
+    path = Path(directory) / PREFERENCE_FILE
+    if key in (None, "auto"):
+        path.unlink(missing_ok=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(key)
 
 
 def build_sources(env=os.environ) -> FallbackPrices:

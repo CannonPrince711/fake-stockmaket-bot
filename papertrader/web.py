@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from . import catalog
 from .portfolio import Portfolio, TradeError
 from .prices import CachedPrices, PriceError
-from .sources import build_sources
+from .sources import build_sources, load_preference, save_preference
 from .profiles import DEFAULT_PROFILE, Profiles, parse_cash
 
 PAGE = Path(__file__).with_name("static") / "index.html"
@@ -28,6 +28,27 @@ class Trader:
         self.prices = CachedPrices(prices or build_sources(), ttl=price_ttl)
         self.lock = threading.Lock()
         self.start_profile = profiles.ensure(start_profile)
+        chooser = self.prices.source
+        if hasattr(chooser, "set_preferred"):
+            try:
+                chooser.set_preferred(load_preference(profiles.dir))
+            except PriceError:
+                pass  # e.g. Finnhub was chosen but its key has since been removed
+
+    def price_sources(self) -> dict:
+        chooser = self.prices.source
+        if not hasattr(chooser, "describe"):
+            raise PriceError("This server's price source can't be switched")
+        return chooser.describe()
+
+    def set_price_source(self, key: str) -> dict:
+        chooser = self.prices.source
+        if not hasattr(chooser, "set_preferred"):
+            raise PriceError("This server's price source can't be switched")
+        chooser.set_preferred(key)
+        save_preference(self.profiles.dir, chooser.preferred)
+        self.prices.clear()
+        return chooser.describe()
 
     def list_profiles(self) -> dict:
         with self.lock:
@@ -162,6 +183,8 @@ def make_handler(trader: Trader, password: str | None = None):
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/profiles":
                 self.handle_api(trader.list_profiles)
+            elif url.path == "/api/sources":
+                self.handle_api(trader.price_sources)
             elif url.path == "/api/catalog":
                 self.send_json({"stocks": catalog.STOCKS, "crypto": catalog.CRYPTO})
             elif url.path == "/api/portfolio":
@@ -197,6 +220,8 @@ def make_handler(trader: Trader, password: str | None = None):
                 self.handle_api(lambda: trader.reset(profile, body.get("cash")))
             elif url.path == "/api/profiles":
                 self.handle_api(lambda: trader.create_profile(str(body.get("name", "")), body.get("cash")))
+            elif url.path == "/api/sources":
+                self.handle_api(lambda: trader.set_price_source(str(body.get("source", ""))))
             elif url.path == "/api/profiles/delete":
                 self.handle_api(lambda: trader.delete_profile(str(body.get("name", ""))))
             else:

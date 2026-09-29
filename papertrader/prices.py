@@ -25,6 +25,7 @@ class SourceDown(PriceError):
 
 
 class YahooPrices:
+    key = "yahoo"
     name = "Yahoo Finance"
 
     def supports(self, symbol: str) -> bool:
@@ -126,6 +127,10 @@ class CachedPrices:
 
     def get_history(self, symbol: str, period: str = "1mo") -> list[dict]:
         return self.source.get_history(symbol, period)
+
+    def clear(self) -> None:
+        with self.lock:
+            self.cache.clear()
 
     def source_of(self, symbol: str) -> str | None:
         """Name of the service the latest price for this symbol came from, if known."""

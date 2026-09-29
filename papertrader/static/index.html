@@ -95,6 +95,10 @@
   .primary:hover:not(:disabled) { filter: brightness(1.08); }
   .picks { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .market-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+  .src-pick { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .src-pick select { font: inherit; font-weight: 650; color: var(--text); background: var(--card-2); border: 1px solid var(--line);
+                     border-radius: 9px; padding: 5px 8px; outline: 0; cursor: pointer; max-width: 170px; }
+  .src-pick select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .source { font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
   .pick.more { border-style: dashed; }
   .pick small { font-weight: 500; opacity: .75; margin-left: 4px; }
@@ -297,7 +301,11 @@
 
   <div class="grid">
     <section class="card panel">
-      <div class="panel-head"><h2 class="card-title">Trade</h2></div>
+      <div class="panel-head"><h2 class="card-title">Trade</h2>
+        <label class="src-pick" id="src-pick" hidden title="Where prices come from. The others are used as backups.">Prices from
+          <select id="source-select"></select>
+        </label>
+      </div>
       <form class="search" id="search" autocomplete="off">
         <div class="search-box">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -723,6 +731,35 @@ function resolveTicker(text) {
   const byName = entries.find(([, name]) => name.toLowerCase() === q || name.toLowerCase().split(" (")[0] === q);
   return byName ? byName[0] : text;
 }
+
+/* ---------- Price source picker ---------- */
+
+function renderSources(info) {
+  $("source-select").innerHTML = `<option value="auto">Auto (Yahoo, then backups)</option>` + info.sources.map((s) =>
+    `<option value="${esc(s.id)}"${s.enabled ? "" : " disabled"} title="${esc(s.covers)}">${esc(s.name)}${
+      s.enabled ? "" : " (needs API key)"}</option>`).join("");
+  $("source-select").value = info.preferred;
+  $("src-pick").hidden = false;
+}
+
+api("/api/sources").then(renderSources).catch(() => {});  // hidden if the server can't switch
+
+$("source-select").addEventListener("change", (e) => {
+  const choice = e.target.value;
+  busy(async () => {
+    try {
+      const info = await api("/api/sources", { source: choice });
+      renderSources(info);
+      const picked = info.sources.find((s) => s.id === info.preferred);
+      toast(picked ? `Prices now come from ${picked.name} first` : "Prices back on Auto");
+      await refresh();
+      if (state.symbol) await lookUp(state.symbol);
+    } catch (err) {
+      api("/api/sources").then(renderSources).catch(() => {});
+      throw err;
+    }
+  });
+});
 
 api("/api/catalog").then((c) => {
   Object.assign(CATALOG.stocks, c.stocks);

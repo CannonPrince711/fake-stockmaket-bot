@@ -90,6 +90,7 @@ profile called `default`, and `--cash` only matters when a profile is first crea
 | `quote SYMBOL [SYMBOL ...]` | Show the current price |
 | `buy SYMBOL AMOUNT` | Buy shares or coins at the current price (fractions are fine) |
 | `sell SYMBOL AMOUNT` or `sell SYMBOL all` | Sell at the current price |
+| `source [NAME]` | Show or switch where prices come from (`auto`, `yahoo`, `finnhub`, `coingecko`, `stooq`) |
 | `stocks` | List popular stocks and ETFs |
 | `crypto` | List popular cryptocurrencies you can trade |
 | `portfolio` | Cash, holdings, and profit/loss |
@@ -158,8 +159,14 @@ falls back to other free services, and the page shows which one a price came fro
 | [CoinGecko](https://www.coingecko.com/en/api) | Crypto prices and charts | No (an optional free demo key gives higher limits) |
 | [Stooq](https://stooq.com) | US stock quotes (can be delayed) and daily charts | No |
 
+**Switching sources:** in the browser, use the **Prices from** menu at the top of the Trade panel.
+In the terminal, type `source` to see the options and `source stooq` (or `yahoo`, `finnhub`,
+`coingecko`, `auto`) to switch. The source you pick is tried first and the others stay on as
+backups, so crypto still works if you pick a stocks-only service. The choice is saved with your
+profiles and applies to everyone using the same app.
+
 A service that's down is skipped for 30 seconds so it doesn't slow down refreshes. To turn on
-Finnhub or change the order, set these (locally, or under **Variables** on Railway):
+Finnhub or change the default order, set these (locally, or under **Variables** on Railway):
 
 | Variable | What it does |
 | --- | --- |
