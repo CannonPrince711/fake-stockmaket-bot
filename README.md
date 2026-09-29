@@ -27,6 +27,10 @@ scroll back through every trade. It follows your system light/dark setting and w
 phone-sized window. Press Ctrl+C in the terminal to stop it. Use `--port 9000` to pick another
 port, or `--no-browser` to skip opening a tab.
 
+Prices, holdings and your total value refresh on their own every 5 seconds while the tab is
+open (a green "Live" dot shows it's working), and numbers flash green or red when they move.
+Trades always fill at a freshly fetched price.
+
 Click the profile button in the top right to switch profiles, create a new one with its own
 starting cash, reset the current one with a new amount, or delete it.
 

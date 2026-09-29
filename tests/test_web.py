@@ -5,6 +5,7 @@ import urllib.request
 
 import pytest
 
+from papertrader.prices import PriceError
 from papertrader.profiles import Profiles
 from papertrader.web import make_server
 from tests.test_trading import FakePrices
@@ -13,7 +14,7 @@ from tests.test_trading import FakePrices
 @pytest.fixture
 def server(tmp_path):
     prices = FakePrices({"AAPL": 200.0, "MSFT": 400.0})
-    srv = make_server(Profiles(tmp_path / "profiles"), port=0, prices=prices)
+    srv = make_server(Profiles(tmp_path / "profiles"), port=0, prices=prices, price_ttl=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     srv.base = f"http://127.0.0.1:{srv.server_address[1]}"
     srv.prices = prices
@@ -114,3 +115,33 @@ def test_password(tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_cached_prices_reuse_then_refresh():
+    from papertrader.prices import CachedPrices
+
+    calls = []
+
+    class Counting(FakePrices):
+        def get_price(self, symbol):
+            calls.append(symbol)
+            return super().get_price(symbol)
+
+    now = [100.0]
+    cached = CachedPrices(Counting({"AAPL": 1.0, "MSFT": 2.0}), ttl=3, clock=lambda: now[0])
+    assert cached.get_price("aapl") == 1.0
+    cached.source.prices["AAPL"] = 5.0
+    assert cached.get_price("AAPL") == 1.0  # still cached
+    now[0] += 3.5
+    assert cached.get_price("AAPL") == 5.0  # expired, fetched again
+    assert cached.fresh_price("AAPL") == 5.0  # trades always fetch
+    assert calls == ["AAPL", "AAPL", "AAPL"]
+    got = cached.get_prices(["AAPL", "MSFT", "NOPE"])
+    assert got["MSFT"] == 2.0 and isinstance(got["NOPE"], PriceError)
+
+
+def test_trade_uses_latest_price_not_cache(server):
+    call(server, "/api/quote?symbol=AAPL")  # caches $200
+    server.prices.prices["AAPL"] = 300.0
+    _, trade = call(server, "/api/buy", {"symbol": "AAPL", "shares": 1})
+    assert trade["price"] == 300.0
